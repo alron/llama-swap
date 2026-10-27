@@ -67,6 +67,9 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 				provided = deliberateAPIKey(r)
 			}
 			_, valid := matchAPIKey(keys, provided)
+			if browser {
+				r = r.WithContext(swaputil.WithoutAuthChallenge(r.Context()))
+			}
 
 			state, sess := sessionNone, session{}
 			if form && use != sessionIgnored {
@@ -91,6 +94,12 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 				// 403, not 401: the browser is logged in, and a 401 would send
 				// the UI back to the login page in a loop.
 				swaputil.SendResponse(w, r, http.StatusForbidden, "forbidden: the request did not come from this llama-swap's own pages")
+			case browser && deliberateAPIKey(r) != "":
+				// A request that sent a key is a client, not a user who needs
+				// the login page. That includes another llama-swap proxying a
+				// browser's page load here with a wrong peer key, where a
+				// redirect would loop through its own login page.
+				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid API key")
 			case browser && use == sessionIgnored:
 				// The login page would only send the browser back here, where
 				// the session does not count, in a loop.
@@ -98,13 +107,14 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 			case browser:
 				// No WWW-Authenticate here: it would bring back the browser's
 				// native dialog that form mode replaces.
+				// Marks this as llama-swap's own "log in" answer, so the UI
+				// can tell it from a 401 an upstream or peer passes through,
+				// and a llama-swap proxying here as a peer can tell it apart.
+				w.Header().Set(swaputil.LoginRequiredHeader, "required")
 				if isPageLoad(r) {
 					redirectRelative(w, loginRedirect(r), http.StatusSeeOther)
 					return
 				}
-				// Marks this as llama-swap's own "log in" answer, so the UI
-				// can tell it from a 401 an upstream or peer passes through.
-				w.Header().Set(loginRequiredHeader, "required")
 				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: log in or provide an API key")
 			default:
 				w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)

@@ -67,11 +67,16 @@ API key. A successful login sets a session cookie, and the sidebar gets a
 logout button.
 
 API clients are unaffected: `Authorization: Bearer`, `x-api-key` and Basic auth
-keep working, and a request without a key from anything other than a browser
-still gets the Basic challenge. Browsers never see the Basic dialog in form
-mode, and Basic credentials a browser sends are ignored. Otherwise a browser
+keep working, and a request without a key still gets the Basic challenge.
+Browsers never see the Basic dialog in form mode, not even from an upstream or
+peer, and Basic credentials a browser sends are ignored. Otherwise a browser
 that cached them, say from before you switched to form mode, would stay logged
 in after logging out.
+
+A request counts as a browser's when it carries `Sec-Fetch-*`, `Origin` or
+`Referer` headers or a session cookie, or asks for HTML. A script that sends
+Basic auth along with such headers is treated as a browser too; give it
+`Authorization: Bearer` instead.
 
 Things to know:
 
@@ -100,6 +105,9 @@ Things to know:
   llama-swap checks `Origin` and `Referer` instead, but cannot tell a page
   framed by another port on the same host from a normal page load. Use HTTPS
   or localhost for full protection.
+- **A peer that wants a login gives a 502.** When a peer is another llama-swap
+  in form mode and `peers.<id>.apiKey` is missing or wrong, its pages answer
+  with a 502 naming that setting instead of a login page.
 - **Behind a plain-HTTP reverse proxy, pass the host through.** Those checks
   compare `Origin`/`Referer` with `Host` or `X-Forwarded-Host`. A proxy that
   rewrites `Host` and sets neither (nginx's default) makes login fail with a

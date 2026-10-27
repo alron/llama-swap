@@ -23,11 +23,12 @@ import (
 // instances on one host share a cookie jar. Instances with different secrets
 // or keys get differently named cookies, so logging in to one never
 // overwrites another's login.
+//
+// The flip side: with the default per-process secret each restart changes
+// the name, and the old cookie stays in the browser, unused, until it
+// expires. Clearing it would mean clearing cookies this instance cannot tell
+// apart from another instance's live login on the same host.
 const sessionCookiePrefix = "llama_swap_session_"
-
-// loginRequiredHeader is set on the 401 a browser gets when it has no valid
-// session. The UI goes to the login page when it sees it.
-const loginRequiredHeader = "X-Llama-Swap-Login"
 
 // processSessionSecret signs sessions when security.auth.sessionSecret is not
 // set. It lives as long as the process: a config reload builds a new Server
@@ -194,6 +195,16 @@ func (sa *sessionAuth) parse(c *http.Cookie) (session, bool) {
 	}
 	s := session{key: key, login: time.Unix(login, 0), expiry: time.Unix(expiry, 0)}
 	if !hmac.Equal([]byte(parts[2]), []byte(sa.signature(s))) {
+		return session{}, false
+	}
+	// Apply the cap as configured now rather than as it was when the cookie
+	// was issued, so lowering sessionMaxLifetime takes effect at once.
+	if sa.maxLifetime > 0 {
+		if limit := s.login.Add(sa.maxLifetime); limit.Before(s.expiry) {
+			s.expiry = limit
+		}
+	}
+	if !sa.now().Before(s.expiry) {
 		return session{}, false
 	}
 	return s, true

@@ -277,6 +277,7 @@ security:
     #   counted from logging in
     # - optional, default: 2592000 (30 days)
     # - 0 means no cap; otherwise it must be at least sessionTTL
+    # - at most 315360000 (10 years), the same as sessionTTL
     # - ignored in basic mode
     sessionMaxLifetime: 2592000
 

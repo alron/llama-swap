@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // formLoginConfig returns a config with form login enabled for keys, signing
@@ -166,6 +167,27 @@ func TestServer_AuthMiddleware_FormMode(t *testing.T) {
 			req: func() *http.Request {
 				r := browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")
 				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			// A client that sent a key needs to hear the key is wrong, not to
+			// be sent to a login page. Another llama-swap proxying a page load
+			// here with a wrong peer key would otherwise loop.
+			name: "wrong Bearer key on a browser page load",
+			req: func() *http.Request {
+				r := browserRequest(http.MethodGet, "/upstream/m1/", "none", "navigate", "document")
+				r.Header.Set("Authorization", "Bearer wrong")
+				return r
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			name: "wrong x-api-key on a page load proxied by a peer",
+			req: func() *http.Request {
+				r := plainHTTPRequest(http.MethodGet, "/upstream/m1/", "text/html", "", "")
+				r.Header.Set("x-api-key", "wrong")
 				return r
 			},
 			wantCode: http.StatusUnauthorized,
@@ -796,16 +818,22 @@ func TestServer_AuthMiddleware_LoginRequiredHeader(t *testing.T) {
 		req  *http.Request
 		want string
 	}{
-		"browser fetch without a session": {plainHTTPRequest(http.MethodGet, "/api/version", "*/*", "", "http://example.com/ui/"), "required"},
-		"API client without a key":        {httptest.NewRequest(http.MethodGet, "/v1/models", nil), ""},
-		"valid session refused":           {refused, ""},
+		"browser fetch without a session":     {plainHTTPRequest(http.MethodGet, "/api/version", "*/*", "", "http://example.com/ui/"), "required"},
+		"browser page load without a session": {plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", ""), "required"},
+		"browser with a wrong Bearer key": {func() *http.Request {
+			r := plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "")
+			r.Header.Set("Authorization", "Bearer wrong")
+			return r
+		}(), ""},
+		"API client without a key": {httptest.NewRequest(http.MethodGet, "/v1/models", nil), ""},
+		"valid session refused":    {refused, ""},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			mw.ServeHTTP(w, tt.req)
-			if got := w.Header().Get(loginRequiredHeader); got != tt.want {
-				t.Errorf("%s = %q, want %q (status %d)", loginRequiredHeader, got, tt.want, w.Code)
+			if got := w.Header().Get(swaputil.LoginRequiredHeader); got != tt.want {
+				t.Errorf("%s = %q, want %q (status %d)", swaputil.LoginRequiredHeader, got, tt.want, w.Code)
 			}
 		})
 	}
@@ -972,5 +1000,64 @@ func TestServer_SessionRenewal_Routes(t *testing.T) {
 	<-done
 	if got := w.Header().Values("Set-Cookie"); len(got) != 0 {
 		t.Errorf("GET /api/events renewed the session: %v", got)
+	}
+}
+
+// TestServer_AuthMiddleware_MarksBrowsersForChallengeStripping pins that only
+// browser requests under form login are marked to lose an upstream's or
+// peer's WWW-Authenticate, so API clients and basic mode still see it.
+func TestServer_AuthMiddleware_MarksBrowsersForChallengeStripping(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.Config
+		browser bool
+		want    bool
+	}{
+		{"form mode, browser", formLoginConfig("secret"), true, true},
+		{"form mode, API client", formLoginConfig("secret"), false, false},
+		{"basic mode, browser", config.Config{RequiredAPIKeys: []string{"secret"}}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stripped bool
+			final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				resp := &http.Response{Header: http.Header{"Www-Authenticate": {"Basic"}}, Request: r}
+				swaputil.StripAuthChallenge(resp)
+				stripped = resp.Header.Get("WWW-Authenticate") == ""
+			})
+			r := httptest.NewRequest(http.MethodGet, "/upstream/m1/", nil)
+			if tt.browser {
+				r.Header.Set("Referer", "http://example.com/ui/")
+			}
+			r.Header.Set("Authorization", "Bearer secret")
+			CreateAuthMiddleware(tt.cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+			if stripped != tt.want {
+				t.Errorf("challenge stripped = %v, want %v", stripped, tt.want)
+			}
+		})
+	}
+}
+
+// TestServer_SessionCapAppliesToExistingCookies pins that the lifetime cap is
+// applied as configured now, so lowering sessionMaxLifetime ends sessions it
+// no longer allows instead of waiting for their next renewal.
+func TestServer_SessionCapAppliesToExistingCookies(t *testing.T) {
+	now := time.Now()
+	issuedUnder := newSessionAuth(formLoginConfig("secret"))
+	cookie := sessionCookieSince(issuedUnder, "secret", now.Add(-2*time.Hour), now.Add(time.Hour))
+
+	for _, tc := range []struct {
+		capSeconds int
+		valid      bool
+	}{{0, true}, {3 * 3600, true}, {3600, false}} {
+		cfg := formLoginConfig("secret")
+		cfg.Security.Auth.SessionMaxLifetime = &tc.capSeconds
+		s, ok := newSessionAuth(cfg).parse(cookie)
+		if ok != tc.valid {
+			t.Errorf("cap %ds: valid = %v, want %v", tc.capSeconds, ok, tc.valid)
+		}
+		if ok && tc.capSeconds > 0 && s.expiry.After(s.login.Add(time.Duration(tc.capSeconds)*time.Second)) {
+			t.Errorf("cap %ds: expiry %v is past the cap", tc.capSeconds, s.expiry)
+		}
 	}
 }

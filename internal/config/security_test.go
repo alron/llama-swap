@@ -425,11 +425,13 @@ func TestConfig_SecurityAuthRejected(t *testing.T) {
 		yaml string
 		want string
 	}{
-		"unknown mode":                {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
-		"negative sessionTTL":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
-		"form without apiKeys":        {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
-		"negative sessionMaxLifetime": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: -1\n" + models, "sessionMaxLifetime must be >= 0"},
-		"cap shorter than sessionTTL": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 7200\n    sessionMaxLifetime: 3600\n" + models, "shorter than sessionTTL"},
+		"unknown mode":                        {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
+		"negative sessionTTL":                 {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
+		"form without apiKeys":                {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
+		"negative sessionMaxLifetime":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: -1\n" + models, "sessionMaxLifetime must be >= 0"},
+		"sessionTTL past the ceiling":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 315360001\n    sessionMaxLifetime: 0\n" + models, "sessionTTL must be at most"},
+		"sessionMaxLifetime past the ceiling": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: 9300000000\n" + models, "sessionMaxLifetime must be at most"},
+		"cap shorter than sessionTTL":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 7200\n    sessionMaxLifetime: 3600\n" + models, "shorter than sessionTTL"},
 	}
 
 	for name, tt := range tests {

@@ -922,3 +922,79 @@ func TestNewPeer_UpstreamFromProxyHost(t *testing.T) {
 		t.Errorf("other upstream = %q, want unknown", got)
 	}
 }
+
+// TestPeer_ServeHTTP_PeerAsksForLogin pins that a peer llama-swap using form
+// login, which answers a browser's page load with a marked redirect to its
+// login page, becomes a 502 naming the setting to fix. Passing the redirect
+// on would loop the browser through this instance's own login page.
+func TestPeer_ServeHTTP_PeerAsksForLogin(t *testing.T) {
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(swaputil.LoginRequiredHeader, "required")
+		w.Header().Set("Location", "../../ui/login?next=%2Fupstream%2Ftest-model%2F")
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	defer peer.Close()
+
+	proxyURL, _ := url.Parse(peer.URL)
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"peer1": {Proxy: peer.URL, ProxyURL: proxyURL, Models: []string{"test-model"}},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/upstream/test-model/", nil)
+	req.Header.Set("Accept", "text/html")
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	w := httptest.NewRecorder()
+	pr.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", w.Code)
+	}
+	if w.Header().Get("Location") != "" || w.Header().Get(swaputil.LoginRequiredHeader) != "" {
+		t.Errorf("peer's login redirect leaked through: %v", w.Header())
+	}
+	if !strings.Contains(w.Body.String(), "peers.peer1.apiKey") {
+		t.Errorf("body = %q, want it to name peers.peer1.apiKey", w.Body.String())
+	}
+}
+
+// TestPeer_ServeHTTP_AuthChallengeOnlyForAPIClients pins that a peer's Basic
+// challenge reaches an API client but not a browser under form login, which
+// would show it as the native dialog.
+func TestPeer_ServeHTTP_AuthChallengeOnlyForAPIClients(t *testing.T) {
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer peer.Close()
+
+	proxyURL, _ := url.Parse(peer.URL)
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"peer1": {Proxy: peer.URL, ProxyURL: proxyURL, Models: []string{"test-model"}, ApiKey: "wrong"},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, browser := range map[string]bool{"API client": false, "browser under form login": true} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			ctx := swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"})
+			if browser {
+				ctx = swaputil.WithoutAuthChallenge(ctx)
+			}
+			*req = *req.WithContext(ctx)
+			w := httptest.NewRecorder()
+			pr.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want the peer's 401", w.Code)
+			}
+			if got := w.Header().Get("WWW-Authenticate") != ""; got == browser {
+				t.Errorf("WWW-Authenticate present = %v for %s", got, name)
+			}
+		})
+	}
+}

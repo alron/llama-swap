@@ -88,6 +88,11 @@ type AuthConfig struct {
 	SessionSecret string `yaml:"sessionSecret"`
 }
 
+// MaxSessionSeconds bounds sessionTTL and sessionMaxLifetime. Ten years is
+// far beyond any useful session and far below the roughly 292 years at which
+// the lifetimes overflow time.Duration.
+const MaxSessionSeconds = 10 * 365 * 24 * 60 * 60
+
 // MinSessionSecretLength is the shortest security.auth.sessionSecret accepted.
 // The secret is all that stops a leaked session cookie from being used to
 // test API key guesses offline, so it must not be guessable itself.
@@ -105,9 +110,15 @@ func (c AuthConfig) Validate() error {
 	if c.SessionTTL < 0 {
 		return fmt.Errorf("sessionTTL must be >= 0")
 	}
+	if c.SessionTTL > MaxSessionSeconds {
+		return fmt.Errorf("sessionTTL must be at most %d (10 years)", MaxSessionSeconds)
+	}
 	if maxLifetime := c.SessionMaxLifetime; maxLifetime != nil {
 		if *maxLifetime < 0 {
 			return fmt.Errorf("sessionMaxLifetime must be >= 0")
+		}
+		if *maxLifetime > MaxSessionSeconds {
+			return fmt.Errorf("sessionMaxLifetime must be at most %d (10 years); use 0 for no cap", MaxSessionSeconds)
 		}
 		// A cap below the session length would silently shorten every
 		// login, which is more likely a mistake than the intent.

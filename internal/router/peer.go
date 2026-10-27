@@ -126,6 +126,15 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			// policy. ReverseProxy adds rather than replaces headers, so keep
 			// only this instance's; see issue #85.
 			swaputil.StripUpstreamCORSHeaders(resp.Header)
+			swaputil.StripAuthChallenge(resp)
+
+			// The peer is a llama-swap using form login and wants a browser
+			// login rather than this instance's key. Passing that on would
+			// send the browser to this instance's login page, which already
+			// has a session and sends it straight back, in a loop.
+			if resp.Header.Get(swaputil.LoginRequiredHeader) != "" {
+				return fmt.Errorf("peer %s rejected the request: set peers.%s.apiKey to one of its apiKeys", peerID, peerID)
+			}
 
 			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 				resp.Header.Set("X-Accel-Buffering", "no")

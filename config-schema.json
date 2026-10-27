@@ -981,19 +981,21 @@
                                 "form"
                             ],
                             "default": "basic",
-                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
+                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. A request counts as a browser's when it carries Sec-Fetch-*, Origin or Referer headers or a session cookie, or asks for HTML. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
                         },
                         "sessionTTL": {
                             "type": "integer",
                             "minimum": 0,
+                            "maximum": 315360000,
                             "default": 604800,
                             "description": "How long in seconds a form login lasts without being used. Using the UI renews the session once less than half of this is left, up to sessionMaxLifetime; the UI's event stream does not count. 0 uses the default of 604800 (7 days). Ignored in basic mode."
                         },
                         "sessionMaxLifetime": {
                             "type": "integer",
                             "minimum": 0,
+                            "maximum": 315360000,
                             "default": 2592000,
-                            "description": "Longest in seconds one form login can be kept alive by renewal, counted from logging in. 0 means no cap. When set it must be at least sessionTTL. Default 2592000 (30 days). Ignored in basic mode."
+                            "description": "Longest in seconds one form login can be kept alive by renewal, counted from logging in. 0 means no cap. When set it must be at least sessionTTL and at most 315360000 (10 years). Lowering it ends existing sessions it no longer allows. Default 2592000 (30 days). Ignored in basic mode."
                         },
                         "sessionSecret": {
                             "type": "string",
