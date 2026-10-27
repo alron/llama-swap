@@ -430,3 +430,25 @@ func TestConfig_SecurityAuthRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestConfig_SecurityAuthSessionSecret covers the optional signing secret: a
+// short one would let a leaked cookie be used to test key guesses again, so
+// it is rejected, and a long enough one loads as written.
+func TestConfig_SecurityAuthSessionSecret(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	const prefix = "apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionSecret: "
+
+	_, err := LoadConfigFromReader(strings.NewReader(prefix + "too-short\n" + models))
+	if err == nil || !strings.Contains(err.Error(), "at least 32 characters") {
+		t.Errorf("short secret: err = %v, want it rejected", err)
+	}
+
+	secret := strings.Repeat("s", MinSessionSecretLength)
+	cfg, err := LoadConfigFromReader(strings.NewReader(prefix + secret + "\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if cfg.Security.Auth.SessionSecret != secret {
+		t.Errorf("sessionSecret = %q, want %q", cfg.Security.Auth.SessionSecret, secret)
+	}
+}

@@ -3,7 +3,7 @@ title: API keys, access control, and keeping secrets out of your config
 summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets; security.auth.mode form gives browsers a login page.
 category: guides
 tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control, login, password-manager, session, cookie]
-config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL]
+config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL, security.auth.sessionSecret]
 updated: 2026-10-27
 ---
 
@@ -72,20 +72,34 @@ still gets the Basic challenge.
 Things to know:
 
 - **Form mode requires `apiKeys`.** Without a key the config fails to load.
-- **Sessions survive restarts and config reloads.** To log every browser out,
-  remove or rotate the key it logged in with; a config reload is enough.
-  Logging out only clears that browser's cookie.
-- **Instances on one host share a login when they share a key.** Cookies are
-  per host, not per port or path, so llama-swap names the cookie after a
-  fingerprint of the key. Instances with different keys keep separate logins.
+- **A restart logs browsers out; a config reload does not.** Sessions are
+  signed with a secret generated at startup. Set `sessionSecret` (32+
+  characters, ideally `${env.*}`) to keep them across restarts. Changing it, or
+  removing the key a browser logged in with, logs that browser out without
+  affecting API clients. Logging out only clears that browser's cookie.
+- **Each instance has its own login.** Cookies ignore the port, so instances on
+  one host see each other's cookies, but each accepts only its own. Instances
+  share a login only when they share both `sessionSecret` and the key.
+- **The session only works from this instance's own pages.** Requests that a
+  page on another site or port makes the browser send get a 403, and
+  `GET /unload` always needs an API key. Links from elsewhere still open the
+  UI, and a link to `/upstream/<model>/` still loads that model.
+- **Plain HTTP on a LAN address is less strict.** Browsers send their
+  `Sec-Fetch-*` headers only over HTTPS and to localhost. Without them
+  llama-swap checks `Origin` and `Referer` instead, but cannot tell a page
+  framed by another port on the same host from a normal page load. Use HTTPS
+  or localhost for full protection.
+- **Behind a plain-HTTP reverse proxy, pass the host through.** Those checks
+  compare `Origin`/`Referer` with `Host` or `X-Forwarded-Host`. A proxy that
+  rewrites `Host` and sets neither (nginx's default) makes login fail with a
+  403; with nginx, add `proxy_set_header Host $http_host;`.
 - **The login does not stick over plain HTTP if the proxy says HTTPS.** The
   cookie is marked `Secure` when llama-swap serves TLS itself or a proxy sends
   `X-Forwarded-Proto: https`, and browsers then refuse to send it over plain
   HTTP.
-- **Links from other sites work, embedding does not.** The session cookie only
-  authenticates the UI's own requests and top-level page loads. A page on
-  another site or port cannot use it to call the API, and the UI shown inside
-  another site's frame asks for a login.
+- **The UI cannot be embedded in another site's frame.** The login page
+  refuses to be framed, and over HTTPS or localhost the session is refused
+  inside one.
 
 ## Keep the keys out of the file
 

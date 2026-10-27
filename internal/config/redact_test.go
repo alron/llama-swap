@@ -27,6 +27,10 @@ peers:
     proxy: "http://10.0.0.5:8080"
     apiKey: "peer-shared-secret"
     models: ["remote-model"]
+security:
+  auth:
+    mode: form
+    sessionSecret: "session-secret-0123456789abcdefghij"
 `
 
 func loadRedactFixture(t *testing.T) Config {
@@ -50,6 +54,7 @@ func TestConfig_RedactedYAML_RemovesEveryCredential(t *testing.T) {
 		"hf_AAAAAAAAAAAAAAAAAAAAAAAA",
 		"hf_BBBBBBBBBBBBBBBBBBBBBBBB",
 		"peer-shared-secret",
+		"session-secret-0123456789abcdefghij",
 	} {
 		if strings.Contains(out, leak) {
 			t.Errorf("redacted config still contains secret %q:\n%s", leak, out)

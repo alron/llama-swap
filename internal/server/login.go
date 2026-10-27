@@ -12,12 +12,8 @@ var loginPageHTML string
 
 var loginPage = template.Must(template.New("login").Parse(loginPageHTML))
 
-// loginOrigin rejects a login or logout posted from another site. The pages
-// themselves sit outside the auth middleware, so they need their own check.
-var loginOrigin = http.NewCrossOriginProtection()
-
-// maxLoginFormBytes caps the login form body; it only ever carries a name,
-// a key and a return path.
+// maxLoginFormBytes caps the login form body; it only ever carries a key and
+// a return path.
 const maxLoginFormBytes = 64 << 10
 
 // loginPageData is what login.html renders.
@@ -35,6 +31,7 @@ func renderLogin(w http.ResponseWriter, status int, data loginPageData) {
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "form-action 'self'; frame-ancestors 'none'")
 	w.WriteHeader(status)
 	_ = loginPage.Execute(w, data)
 }
@@ -43,7 +40,7 @@ func renderLogin(w http.ResponseWriter, status int, data loginPageData) {
 // already holds a valid session goes straight on to where it was headed.
 func (sa *sessionAuth) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	next := r.URL.Query().Get("next")
-	if sa.authenticated(r) {
+	if sa.check(r) == sessionValid {
 		redirectRelative(w, loginReturnPath(next), http.StatusSeeOther)
 		return
 	}
@@ -55,7 +52,9 @@ func (sa *sessionAuth) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 // headed. A submitted username is ignored, the same as the username of Basic
 // auth.
 func (sa *sessionAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := loginOrigin.Check(r); err != nil {
+	// These handlers sit outside the auth middleware, so they need their own
+	// check that the form was posted from this llama-swap's login page.
+	if !sameOriginRequest(r) {
 		http.Error(w, "llama-swap: cross-origin login rejected", http.StatusForbidden)
 		return
 	}
@@ -66,6 +65,8 @@ func (sa *sessionAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	next := r.PostForm.Get("next")
+	// Trimmed because a key pasted by hand often brings a stray newline. Header
+	// keys are not trimmed, which is safe: the loader rejects keys with spaces.
 	key, ok := matchAPIKey(sa.keys, strings.TrimSpace(r.PostForm.Get("password")))
 	if !ok {
 		renderLogin(w, http.StatusUnauthorized, loginPageData{Next: next, Error: "That API key is not valid."})
@@ -76,16 +77,16 @@ func (sa *sessionAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	redirectRelative(w, loginReturnPath(next), http.StatusSeeOther)
 }
 
-// handleLogout clears every llama-swap session cookie the browser sent and
-// returns it to the login page. Instances sharing the key share the cookie,
-// so this logs the browser out of all of them.
+// handleLogout clears this instance's session cookies and returns the browser
+// to the login page. The browser also sends the cookies of other instances on
+// the same host, since cookies ignore the port; those are left alone.
 func (sa *sessionAuth) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if err := loginOrigin.Check(r); err != nil {
+	if !sameOriginRequest(r) {
 		http.Error(w, "llama-swap: cross-origin logout rejected", http.StatusForbidden)
 		return
 	}
 	for _, c := range r.Cookies() {
-		if strings.HasPrefix(c.Name, sessionCookiePrefix) {
+		if _, ours := sa.byCookie[c.Name]; ours {
 			http.SetCookie(w, &http.Cookie{
 				Name:     c.Name,
 				Value:    "",

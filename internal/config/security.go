@@ -66,10 +66,22 @@ type AuthConfig struct {
 	// SessionTTL is how long in seconds a form login lasts before the browser
 	// must log in again. 0 means DefaultSessionTTL. Ignored in basic mode.
 	SessionTTL int `yaml:"sessionTTL"`
+
+	// SessionSecret signs form login sessions. Empty means a random secret
+	// generated when llama-swap starts, so a restart logs every browser out.
+	// Setting it keeps sessions across restarts, and instances that share it
+	// and a key share a login. Changing it logs every browser out without
+	// touching the apiKeys API clients use. Ignored in basic mode.
+	SessionSecret string `yaml:"sessionSecret"`
 }
 
-// Validate reports an unknown mode or a negative session lifetime. Defaults
-// are applied by the loader before this runs.
+// MinSessionSecretLength is the shortest security.auth.sessionSecret accepted.
+// The secret is all that stops a leaked session cookie from being used to
+// test API key guesses offline, so it must not be guessable itself.
+const MinSessionSecretLength = 32
+
+// Validate reports an unknown mode, a negative session lifetime or a short
+// session secret. Defaults are applied by the loader before this runs.
 func (c AuthConfig) Validate() error {
 	switch c.Mode {
 	case AuthModeBasic, AuthModeForm:
@@ -78,6 +90,9 @@ func (c AuthConfig) Validate() error {
 	}
 	if c.SessionTTL < 0 {
 		return fmt.Errorf("sessionTTL must be >= 0")
+	}
+	if c.SessionSecret != "" && len(c.SessionSecret) < MinSessionSecretLength {
+		return fmt.Errorf("sessionSecret must be at least %d characters; generate one with: head -c 32 /dev/urandom | base64", MinSessionSecretLength)
 	}
 	return nil
 }

@@ -988,6 +988,10 @@
                             "minimum": 0,
                             "default": 604800,
                             "description": "How long in seconds a form login lasts before the browser must log in again. 0 uses the default of 604800 (7 days). Ignored in basic mode."
+                        },
+                        "sessionSecret": {
+                            "type": "string",
+                            "description": "Secret that signs form login sessions, at least 32 characters. When unset a random secret is generated at startup, so a restart logs every browser out. Set it to keep sessions across restarts, or to share a login between instances that use the same secret and key. Changing it logs every browser out without affecting API clients. Use an env macro to keep it out of the config file. Ignored in basic mode."
                         }
                     },
                     "additionalProperties": false

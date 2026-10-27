@@ -270,6 +270,15 @@ security:
     # - ignored in basic mode
     sessionTTL: 604800
 
+    # sessionSecret: signs form login sessions
+    # - optional, default: a random secret generated at startup, so a restart
+    #   logs every browser out
+    # - set it to keep sessions across restarts; instances with the same
+    #   secret and key share a login
+    # - at least 32 characters; changing it logs every browser out
+    # - ignored in basic mode
+    # sessionSecret: "${env.LLAMA_SWAP_SESSION_SECRET}"
+
 # tailcat: configure models exposed over Tailcat virtual TCP port 80
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID

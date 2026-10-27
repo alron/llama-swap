@@ -20,36 +20,48 @@ import (
 // clients still get the challenge, so their behaviour does not depend on the
 // mode.
 func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
-	keys := cfg.RequiredAPIKeys
-	sessions := newSessionAuth(cfg)
+	return createAuthMiddleware(cfg.RequiredAPIKeys, newSessionAuth(cfg))
+}
+
+// createAuthMiddleware is CreateAuthMiddleware with the session check passed
+// in, so routes can share one and leave it out of routes that must not accept
+// the cookie. A nil sessions accepts API keys only.
+func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		if len(keys) == 0 {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, valid := matchAPIKey(keys, swaputil.ExtractAPIKey(r))
+			session := sessionNone
+			browser := false
 			if sessions != nil {
-				valid = valid || sessions.authenticated(r)
-				stripSessionCookies(r.Header)
+				session = sessions.check(r)
+				browser = isBrowserRequest(r)
 			}
+			// Strip in every mode: a cookie left over from form mode is no
+			// use to an upstream or peer.
+			stripSessionCookies(r.Header)
 
-			if !valid {
-				if sessions != nil && isBrowserRequest(r) {
-					// No WWW-Authenticate here: it would bring back the
-					// browser's native dialog that form mode replaces.
-					if isPageLoad(r) {
-						redirectRelative(w, loginRedirect(r), http.StatusSeeOther)
-						return
-					}
-					swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: log in or provide an API key")
+			switch {
+			case valid || session == sessionValid:
+				next.ServeHTTP(w, r)
+			case session == sessionRefused:
+				// 403, not 401: the browser is logged in, and a 401 would send
+				// the UI back to the login page in a loop.
+				swaputil.SendResponse(w, r, http.StatusForbidden, "forbidden: the request did not come from this llama-swap's own pages")
+			case browser:
+				// No WWW-Authenticate here: it would bring back the browser's
+				// native dialog that form mode replaces.
+				if isPageLoad(r) {
+					redirectRelative(w, loginRedirect(r), http.StatusSeeOther)
 					return
 				}
+				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: log in or provide an API key")
+			default:
 				w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)
 				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
-				return
 			}
-
-			next.ServeHTTP(w, r)
 		})
 	}
 }
