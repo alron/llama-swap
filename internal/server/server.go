@@ -397,7 +397,7 @@ func stripAudioAPIPrefix(r *http.Request) {
 func (s *Server) routes() {
 
 	sessions := newSessionAuth(s.cfg)
-	authMW := createAuthMiddleware(s.cfg.RequiredAPIKeys, sessions)
+	authMW := createAuthMiddleware(s.cfg.RequiredAPIKeys, sessions, true)
 	modelMWs := []chain.Middleware{authMW, createContentTypeMiddleware(s.cfg.MaxRequestBodyBytes())}
 	// globalConcurrencyLimit guards the top of the inference chain; a limit of
 	// 0 (the default) means no limit, so the handler is left out of the chain
@@ -417,6 +417,9 @@ func (s *Server) routes() {
 	modelChain := chain.New(modelMWs...)
 	// Custom endpoints only need auth.
 	apiChain := chain.New(authMW)
+	// Streams that only watch do not count as the browser being in use, so a
+	// form login left open in an idle tab still expires.
+	watchChain := chain.New(createAuthMiddleware(s.cfg.RequiredAPIKeys, sessions, false))
 
 	mux := http.NewServeMux()
 	dispatch := http.HandlerFunc(s.localPeerHandler)
@@ -435,8 +438,8 @@ func (s *Server) routes() {
 	mux.Handle("GET /v1/models", apiChain.ThenFunc(s.handleListModels))
 	mux.Handle("GET /models", apiChain.ThenFunc(s.handleListModels))
 	mux.Handle("GET /logs", apiChain.ThenFunc(s.handleLogs))
-	mux.Handle("GET /logs/stream", apiChain.ThenFunc(s.handleLogStream))
-	mux.Handle("GET /logs/stream/{logMonitorID...}", apiChain.ThenFunc(s.handleLogStream))
+	mux.Handle("GET /logs/stream", watchChain.ThenFunc(s.handleLogStream))
+	mux.Handle("GET /logs/stream/{logMonitorID...}", watchChain.ThenFunc(s.handleLogStream))
 
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /wol-health", handleHealth)
@@ -478,7 +481,7 @@ func (s *Server) routes() {
 	// Operations endpoints. GET /unload acts on a plain GET, which a page on
 	// another site or port can make a browser send, so it takes API keys only
 	// and never the form login cookie. The UI unloads via POST /api/... .
-	mux.Handle("GET /unload", chain.New(createAuthMiddleware(s.cfg.RequiredAPIKeys, nil)).ThenFunc(s.handleUnload))
+	mux.Handle("GET /unload", chain.New(createAuthMiddleware(s.cfg.RequiredAPIKeys, nil, false)).ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
@@ -510,8 +513,8 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
 	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
-	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
-	mux.Handle("GET /api/events/logs", apiChain.ThenFunc(s.handleAPILogEvents))
+	mux.Handle("GET /api/events", watchChain.ThenFunc(s.handleAPIEvents))
+	mux.Handle("GET /api/events/logs", watchChain.ThenFunc(s.handleAPILogEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
 	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))

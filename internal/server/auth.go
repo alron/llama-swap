@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
-	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -22,27 +21,31 @@ import (
 // clients still get the challenge, so their behaviour does not depend on the
 // mode.
 func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
-	return createAuthMiddleware(cfg.RequiredAPIKeys, newSessionAuth(cfg))
+	return createAuthMiddleware(cfg.RequiredAPIKeys, newSessionAuth(cfg), true)
 }
 
 // createAuthMiddleware is CreateAuthMiddleware with the session check passed
 // in, so routes can share one and leave it out of routes that must not accept
 // the cookie. A nil sessions accepts API keys only.
 //
+// renew says whether a request counts as the browser being in use, which
+// renews its session. Streams that only watch, such as the UI's event stream,
+// pass false so an idle open tab still logs out.
+//
 // A request authenticated only by the cookie ends when the session does, so
-// a long-lived one such as the UI's event stream cannot outlast it. The UI
-// notices the stream close and goes to the login page.
-func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware {
+// a long-lived one such as the event stream cannot outlast it. The UI notices
+// the stream close and goes to the login page.
+func createAuthMiddleware(keys []string, sessions *sessionAuth, renew bool) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		if len(keys) == 0 {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, valid := matchAPIKey(keys, swaputil.ExtractAPIKey(r))
-			session, expiry := sessionNone, time.Time{}
+			state, sess := sessionNone, session{}
 			browser := false
 			if sessions != nil {
-				session, expiry = sessions.check(r)
+				state, sess = sessions.check(r)
 				browser = isBrowserRequest(r)
 			}
 			// Strip in every mode: a cookie left over from form mode is no
@@ -52,11 +55,15 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware
 			switch {
 			case valid:
 				next.ServeHTTP(w, r)
-			case session == sessionValid:
-				ctx, cancel := context.WithDeadline(r.Context(), expiry)
+			case state == sessionValid:
+				if renewed, ok := sessions.renew(sess); ok && renew {
+					sess = renewed
+					http.SetCookie(w, sessions.cookie(r, sess))
+				}
+				ctx, cancel := context.WithDeadline(r.Context(), sess.expiry)
 				defer cancel()
 				next.ServeHTTP(w, r.WithContext(ctx))
-			case session == sessionRefused:
+			case state == sessionRefused:
 				// 403, not 401: the browser is logged in, and a 401 would send
 				// the UI back to the login page in a loop.
 				swaputil.SendResponse(w, r, http.StatusForbidden, "forbidden: the request did not come from this llama-swap's own pages")

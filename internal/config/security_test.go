@@ -399,6 +399,18 @@ func TestConfig_SecurityAuthDefaults(t *testing.T) {
 	if cfg.Security.Auth.SessionTTL != DefaultSessionTTL {
 		t.Errorf("sessionTTL = %d, want %d", cfg.Security.Auth.SessionTTL, DefaultSessionTTL)
 	}
+	if got := cfg.Security.Auth.SessionMaxLifetime; got == nil || *got != DefaultSessionMaxLifetime {
+		t.Errorf("sessionMaxLifetime = %v, want %d", got, DefaultSessionMaxLifetime)
+	}
+
+	// An explicit 0 means no cap, and must not be replaced by the default.
+	cfg, err = LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 86400\n    sessionMaxLifetime: 0\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if got := cfg.Security.Auth.SessionMaxLifetime; got == nil || *got != 0 {
+		t.Errorf("explicit sessionMaxLifetime 0 loaded as %v, want 0", got)
+	}
 	if !cfg.FormLoginEnabled() {
 		t.Error("FormLoginEnabled() = false with mode form and apiKeys")
 	}
@@ -413,9 +425,11 @@ func TestConfig_SecurityAuthRejected(t *testing.T) {
 		yaml string
 		want string
 	}{
-		"unknown mode":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
-		"negative sessionTTL":  {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
-		"form without apiKeys": {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
+		"unknown mode":                {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
+		"negative sessionTTL":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
+		"form without apiKeys":        {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
+		"negative sessionMaxLifetime": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: -1\n" + models, "sessionMaxLifetime must be >= 0"},
+		"cap shorter than sessionTTL": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 7200\n    sessionMaxLifetime: 3600\n" + models, "shorter than sessionTTL"},
 	}
 
 	for name, tt := range tests {

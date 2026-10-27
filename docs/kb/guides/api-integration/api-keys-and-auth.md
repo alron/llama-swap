@@ -3,7 +3,7 @@ title: API keys, access control, and keeping secrets out of your config
 summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets; security.auth.mode form gives browsers a login page.
 category: guides
 tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control, login, password-manager, session, cookie]
-config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL, security.auth.sessionSecret]
+config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL, security.auth.sessionMaxLifetime, security.auth.sessionSecret]
 updated: 2026-10-27
 ---
 
@@ -57,8 +57,9 @@ apiKeys:
   - "${env.LLAMA_SWAP_KEY}"
 security:
   auth:
-    mode: form        # default: basic
-    sessionTTL: 604800 # seconds, default 7 days
+    mode: form                 # default: basic
+    sessionTTL: 604800         # idle timeout in seconds, default 7 days
+    sessionMaxLifetime: 2592000 # cap from login, default 30 days; 0 = no cap
 ```
 
 Opening the UI now redirects to `/ui/login`. Enter one of the `apiKeys` as the
@@ -72,6 +73,13 @@ still gets the Basic challenge.
 Things to know:
 
 - **Form mode requires `apiKeys`.** Without a key the config fails to load.
+- **A session lasts while it is used.** Using the UI renews it once less than
+  half of `sessionTTL` is left, so `sessionTTL` is how long a browser stays
+  logged in without being used. Renewal stops at `sessionMaxLifetime` after
+  login (`0` removes the cap). The UI's event stream does not count, but pages
+  that poll do, so a tab left open on one keeps the session alive up to the
+  cap. When a session ends, any request still running is cut off and the UI
+  returns to the login page.
 - **A restart logs browsers out; a config reload does not.** Sessions are
   signed with a secret generated at startup. Set `sessionSecret` (32+
   characters, ideally `${env.*}`) to keep them across restarts. Changing it, or

@@ -987,7 +987,13 @@
                             "type": "integer",
                             "minimum": 0,
                             "default": 604800,
-                            "description": "How long in seconds a form login lasts before the browser must log in again. 0 uses the default of 604800 (7 days). Ignored in basic mode."
+                            "description": "How long in seconds a form login lasts without being used. Using the UI renews the session once less than half of this is left, up to sessionMaxLifetime; the UI's event stream does not count. 0 uses the default of 604800 (7 days). Ignored in basic mode."
+                        },
+                        "sessionMaxLifetime": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 2592000,
+                            "description": "Longest in seconds one form login can be kept alive by renewal, counted from logging in. 0 means no cap. When set it must be at least sessionTTL. Default 2592000 (30 days). Ignored in basic mode."
                         },
                         "sessionSecret": {
                             "type": "string",

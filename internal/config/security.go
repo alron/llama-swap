@@ -49,6 +49,10 @@ const (
 // seven days, in seconds.
 const DefaultSessionTTL = 7 * 24 * 60 * 60
 
+// DefaultSessionMaxLifetime is the security.auth.sessionMaxLifetime used when
+// it is not set: thirty days, in seconds.
+const DefaultSessionMaxLifetime = 30 * 24 * 60 * 60
+
 // SecurityConfig groups settings that control who may talk to llama-swap.
 type SecurityConfig struct {
 	CORS CORSConfig `yaml:"cors"`
@@ -63,9 +67,16 @@ type AuthConfig struct {
 	// apiKeys, since there is otherwise nothing to log in with.
 	Mode string `yaml:"mode"`
 
-	// SessionTTL is how long in seconds a form login lasts before the browser
-	// must log in again. 0 means DefaultSessionTTL. Ignored in basic mode.
+	// SessionTTL is how long in seconds a form login lasts without being
+	// used. Using it renews the session, up to SessionMaxLifetime. 0 means
+	// DefaultSessionTTL. Ignored in basic mode.
 	SessionTTL int `yaml:"sessionTTL"`
+
+	// SessionMaxLifetime caps in seconds how long one login can be kept alive
+	// by renewal, counted from when the browser logged in. 0 means no cap.
+	// It is a pointer so an absent key (nil, DefaultSessionMaxLifetime) and
+	// an explicit 0 can be told apart. Ignored in basic mode.
+	SessionMaxLifetime *int `yaml:"sessionMaxLifetime"`
 
 	// SessionSecret signs form login sessions. Empty means a random secret
 	// generated when llama-swap starts, so a restart logs every browser out.
@@ -80,8 +91,9 @@ type AuthConfig struct {
 // test API key guesses offline, so it must not be guessable itself.
 const MinSessionSecretLength = 32
 
-// Validate reports an unknown mode, a negative session lifetime or a short
-// session secret. Defaults are applied by the loader before this runs.
+// Validate reports an unknown mode, a negative or inconsistent session
+// lifetime, or a short session secret. Defaults are applied by the loader
+// before this runs.
 func (c AuthConfig) Validate() error {
 	switch c.Mode {
 	case AuthModeBasic, AuthModeForm:
@@ -90,6 +102,16 @@ func (c AuthConfig) Validate() error {
 	}
 	if c.SessionTTL < 0 {
 		return fmt.Errorf("sessionTTL must be >= 0")
+	}
+	if maxLifetime := c.SessionMaxLifetime; maxLifetime != nil {
+		if *maxLifetime < 0 {
+			return fmt.Errorf("sessionMaxLifetime must be >= 0")
+		}
+		// A cap below the session length would silently shorten every
+		// login, which is more likely a mistake than the intent.
+		if *maxLifetime > 0 && *maxLifetime < c.SessionTTL {
+			return fmt.Errorf("sessionMaxLifetime (%d) is shorter than sessionTTL (%d); raise it, or set 0 for no cap", *maxLifetime, c.SessionTTL)
+		}
 	}
 	if c.SessionSecret != "" && len(c.SessionSecret) < MinSessionSecretLength {
 		return fmt.Errorf("sessionSecret must be at least %d characters; generate one with: head -c 32 /dev/urandom | base64", MinSessionSecretLength)

@@ -41,19 +41,24 @@ var processSessionSecret = func() []byte {
 
 // sessionAuth issues and checks the cookies behind security.auth.mode: form.
 //
-// Nothing is stored server side. A cookie carries its own expiry and an HMAC
-// of it, keyed from the session secret and the API key used to log in.
-// Without the secret a leaked cookie cannot be used to test guesses of the
-// key. Removing the key from apiKeys or changing the secret ends the
-// sessions issued with it; a single session cannot be revoked, and logging
-// out only clears the browser's copy.
+// Nothing is stored server side. A cookie carries when the browser logged in,
+// when the session ends, and an HMAC of both keyed from the session secret
+// and the API key used to log in. Without the secret a leaked cookie cannot
+// be used to test guesses of the key. Removing the key from apiKeys or
+// changing the secret ends the sessions issued with it; a single session
+// cannot be revoked, and logging out only clears the browser's copy.
+//
+// A session in use is renewed (see renew), so ttl is really an idle timeout
+// and maxLifetime caps how long one login can last in total.
 type sessionAuth struct {
 	secret []byte
 	keys   []string
 	// byCookie maps each key's cookie name back to the key.
 	byCookie map[string]string
 	ttl      time.Duration
-	now      func() time.Time
+	// maxLifetime is measured from login; 0 means no cap.
+	maxLifetime time.Duration
+	now         func() time.Time
 }
 
 // newSessionAuth returns nil unless the config enables form login, so callers
@@ -62,18 +67,23 @@ func newSessionAuth(cfg config.Config) *sessionAuth {
 	if !cfg.FormLoginEnabled() {
 		return nil
 	}
+	auth := cfg.Security.Auth
 	sa := &sessionAuth{
-		secret:   processSessionSecret,
-		keys:     cfg.RequiredAPIKeys,
-		byCookie: make(map[string]string, len(cfg.RequiredAPIKeys)),
-		ttl:      time.Duration(cfg.Security.Auth.SessionTTL) * time.Second,
-		now:      time.Now,
+		secret:      processSessionSecret,
+		keys:        cfg.RequiredAPIKeys,
+		byCookie:    make(map[string]string, len(cfg.RequiredAPIKeys)),
+		ttl:         time.Duration(auth.SessionTTL) * time.Second,
+		maxLifetime: config.DefaultSessionMaxLifetime * time.Second,
+		now:         time.Now,
 	}
-	if secret := cfg.Security.Auth.SessionSecret; secret != "" {
-		sa.secret = []byte(secret)
+	if auth.SessionSecret != "" {
+		sa.secret = []byte(auth.SessionSecret)
 	}
 	if sa.ttl <= 0 {
 		sa.ttl = config.DefaultSessionTTL * time.Second
+	}
+	if auth.SessionMaxLifetime != nil {
+		sa.maxLifetime = time.Duration(*auth.SessionMaxLifetime) * time.Second
 	}
 	for _, key := range cfg.RequiredAPIKeys {
 		sa.byCookie[sa.cookieName(key)] = key
@@ -94,52 +104,105 @@ func (sa *sessionAuth) cookieName(key string) string {
 	return sessionCookiePrefix + hex.EncodeToString(sa.derive("cookie name", key)[:4])
 }
 
-// signature is the HMAC binding an expiry to key.
-func (sa *sessionAuth) signature(key string, expiry int64) string {
-	mac := hmac.New(sha256.New, sa.derive("signing key", key))
-	mac.Write([]byte(strconv.FormatInt(expiry, 10)))
+// session is a login read from, or written to, a session cookie.
+type session struct {
+	key string
+	// login is when the browser logged in. Renewal never moves it, so the
+	// lifetime cap is measured from here.
+	login  time.Time
+	expiry time.Time
+}
+
+// payload is the signed part of a session cookie: login and expiry in Unix
+// seconds.
+func (s session) payload() string {
+	return strconv.FormatInt(s.login.Unix(), 10) + "." + strconv.FormatInt(s.expiry.Unix(), 10)
+}
+
+// signature is the HMAC binding a session's payload to its key.
+func (sa *sessionAuth) signature(s session) string {
+	mac := hmac.New(sha256.New, sa.derive("signing key", s.key))
+	mac.Write([]byte(s.payload()))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// newCookie returns a session cookie for key, valid for the configured TTL.
-func (sa *sessionAuth) newCookie(r *http.Request, key string) *http.Cookie {
-	expiry := sa.now().Add(sa.ttl).Unix()
+// start returns a new session for key, beginning now.
+func (sa *sessionAuth) start(key string) session {
+	now := sa.now()
+	return session{key: key, login: now, expiry: sa.expiryFrom(now, now)}
+}
+
+// expiryFrom returns when a session that began at login ends if last used at
+// now: one ttl later, but no later than the lifetime cap.
+func (sa *sessionAuth) expiryFrom(login, now time.Time) time.Time {
+	expiry := now.Add(sa.ttl)
+	if sa.maxLifetime > 0 {
+		if limit := login.Add(sa.maxLifetime); expiry.After(limit) {
+			expiry = limit
+		}
+	}
+	// The cookie stores whole seconds; match it so a session compares
+	// equal to itself after a round trip.
+	return time.Unix(expiry.Unix(), 0)
+}
+
+// renew extends s when less than half its ttl is left, so a browser in use
+// stays logged in. Renewing only past the halfway point keeps most requests
+// from setting a cookie, and the cap stops a session, stolen or not, from
+// being kept alive forever. It reports whether s changed.
+func (sa *sessionAuth) renew(s session) (session, bool) {
+	now := sa.now()
+	if s.expiry.Sub(now) >= sa.ttl/2 {
+		return s, false
+	}
+	expiry := sa.expiryFrom(s.login, now)
+	if !expiry.After(s.expiry) {
+		return s, false
+	}
+	s.expiry = expiry
+	return s, true
+}
+
+// cookie returns the cookie carrying s.
+func (sa *sessionAuth) cookie(r *http.Request, s session) *http.Cookie {
 	return &http.Cookie{
-		Name:     sa.cookieName(key),
-		Value:    strconv.FormatInt(expiry, 10) + "." + sa.signature(key, expiry),
+		Name:     sa.cookieName(s.key),
+		Value:    s.payload() + "." + sa.signature(s),
 		Path:     "/",
-		MaxAge:   int(sa.ttl / time.Second),
+		MaxAge:   max(int(s.expiry.Unix()-sa.now().Unix()), 1),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsHTTPS(r),
 	}
 }
 
-// sessionExpiry returns when the session in c ends, and whether c carries an
-// unexpired session for one of the configured keys at all.
-func (sa *sessionAuth) sessionExpiry(c *http.Cookie) (time.Time, bool) {
+// parse returns the session in c, and whether c carries an unexpired session
+// for one of the configured keys at all.
+func (sa *sessionAuth) parse(c *http.Cookie) (session, bool) {
 	key, ok := sa.byCookie[c.Name]
 	if !ok {
-		return time.Time{}, false
+		return session{}, false
 	}
-	expiryText, sig, ok := strings.Cut(c.Value, ".")
-	if !ok {
-		return time.Time{}, false
+	parts := strings.Split(c.Value, ".")
+	if len(parts) != 3 {
+		return session{}, false
 	}
-	expiry, err := strconv.ParseInt(expiryText, 10, 64)
-	if err != nil || sa.now().Unix() >= expiry {
-		return time.Time{}, false
+	login, err1 := strconv.ParseInt(parts[0], 10, 64)
+	expiry, err2 := strconv.ParseInt(parts[1], 10, 64)
+	if err1 != nil || err2 != nil || sa.now().Unix() >= expiry {
+		return session{}, false
 	}
-	if !hmac.Equal([]byte(sig), []byte(sa.signature(key, expiry))) {
-		return time.Time{}, false
+	s := session{key: key, login: time.Unix(login, 0), expiry: time.Unix(expiry, 0)}
+	if !hmac.Equal([]byte(parts[2]), []byte(sa.signature(s))) {
+		return session{}, false
 	}
-	return time.Unix(expiry, 0), true
+	return s, true
 }
 
 // validCookie reports whether c carries an unexpired session for one of the
 // configured keys.
 func (sa *sessionAuth) validCookie(c *http.Cookie) bool {
-	_, ok := sa.sessionExpiry(c)
+	_, ok := sa.parse(c)
 	return ok
 }
 
@@ -159,20 +222,20 @@ const (
 )
 
 // check reports what r's session cookie amounts to, see
-// sessionRequestAllowed, and when a valid session ends.
-func (sa *sessionAuth) check(r *http.Request) (sessionState, time.Time) {
+// sessionRequestAllowed, and the session itself when it is valid.
+func (sa *sessionAuth) check(r *http.Request) (sessionState, session) {
 	for _, c := range r.Cookies() {
 		if !strings.HasPrefix(c.Name, sessionCookiePrefix) {
 			continue
 		}
-		if expiry, ok := sa.sessionExpiry(c); ok {
+		if s, ok := sa.parse(c); ok {
 			if sessionRequestAllowed(r) {
-				return sessionValid, expiry
+				return sessionValid, s
 			}
-			return sessionRefused, expiry
+			return sessionRefused, s
 		}
 	}
-	return sessionNone, time.Time{}
+	return sessionNone, session{}
 }
 
 // sessionRequestAllowed reports whether r may authenticate with the session

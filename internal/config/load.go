@@ -119,11 +119,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if config.Security.Auth.Mode == "" {
 		config.Security.Auth.Mode = AuthModeBasic
 	}
-	if err := config.Security.Auth.Validate(); err != nil {
-		return Config{}, fmt.Errorf("security.auth: %w", err)
-	}
 	if config.Security.Auth.SessionTTL == 0 {
 		config.Security.Auth.SessionTTL = DefaultSessionTTL
+	}
+	if config.Security.Auth.SessionMaxLifetime == nil {
+		maxLifetime := DefaultSessionMaxLifetime
+		config.Security.Auth.SessionMaxLifetime = &maxLifetime
+	}
+	if err := config.Security.Auth.Validate(); err != nil {
+		return Config{}, fmt.Errorf("security.auth: %w", err)
 	}
 
 	if _, _, _, err := ParseLogToStdout(config.LogToStdout); err != nil {

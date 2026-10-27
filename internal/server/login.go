@@ -73,7 +73,7 @@ func (sa *sessionAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, sa.newCookie(r, key))
+	http.SetCookie(w, sa.cookie(r, sa.start(key)))
 	redirectRelative(w, loginReturnPath(next), http.StatusSeeOther)
 }
 

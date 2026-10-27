@@ -265,10 +265,19 @@ security:
     # - form requires apiKeys
     mode: basic
 
-    # sessionTTL: seconds a form login lasts before logging in again
+    # sessionTTL: seconds a form login lasts without being used
     # - optional, default: 604800 (7 days)
+    # - using the UI renews the session once less than half is left; the
+    #   UI's event stream alone does not, so an idle open tab still logs out
     # - ignored in basic mode
     sessionTTL: 604800
+
+    # sessionMaxLifetime: longest one login can be kept alive by renewal,
+    #   counted from logging in
+    # - optional, default: 2592000 (30 days)
+    # - 0 means no cap; otherwise it must be at least sessionTTL
+    # - ignored in basic mode
+    sessionMaxLifetime: 2592000
 
     # sessionSecret: signs form login sessions
     # - optional, default: a random secret generated at startup, so a restart
