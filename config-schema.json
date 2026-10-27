@@ -969,6 +969,28 @@
                         ]
                     },
                     "additionalProperties": false
+                },
+                "auth": {
+                    "type": "object",
+                    "description": "How a browser is asked for one of the apiKeys. API clients sending the key in a header are unaffected.",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": [
+                                "basic",
+                                "form"
+                            ],
+                            "default": "basic",
+                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better. Basic auth, Bearer and x-api-key keep working in both modes. 'form' requires apiKeys."
+                        },
+                        "sessionTTL": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 604800,
+                            "description": "How long in seconds a form login lasts before the browser must log in again. 0 uses the default of 604800 (7 days). Ignored in basic mode."
+                        }
+                    },
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false,

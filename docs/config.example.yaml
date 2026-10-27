@@ -253,6 +253,23 @@ security:
     # - optional, default: 86400
     maxAge: 86400
 
+  # auth: how a browser is asked for one of the apiKeys
+  # - API clients sending the key as Bearer, x-api-key or Basic auth work the
+  #   same in either mode
+  auth:
+    # mode: basic or form
+    # - optional, default: basic
+    # - basic: the browser shows its native login dialog
+    # - form: the browser is sent to a login page at /ui/login, which password
+    #   managers fill reliably; the password is one of the apiKeys
+    # - form requires apiKeys
+    mode: basic
+
+    # sessionTTL: seconds a form login lasts before logging in again
+    # - optional, default: 604800 (7 days)
+    # - ignored in basic mode
+    sessionTTL: 604800
+
 # tailcat: configure models exposed over Tailcat virtual TCP port 80
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID

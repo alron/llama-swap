@@ -449,6 +449,14 @@ func (s *Server) routes() {
 		redirectRelative(w, "ui/", http.StatusPermanentRedirect)
 	})
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
+	// Form login lives under /ui/ so its relative redirects survive a
+	// prefix-stripping reverse proxy. It is only registered in form mode;
+	// basic mode serves exactly what it did before the setting existed.
+	if sessions := newSessionAuth(s.cfg); sessions != nil {
+		mux.HandleFunc("GET /ui/login", sessions.handleLoginPage)
+		mux.HandleFunc("POST /ui/login", sessions.handleLogin)
+		mux.HandleFunc("POST /ui/logout", sessions.handleLogout)
+	}
 	// The browser fetches the web app manifest - and the icons it references -
 	// itself while deciding whether to offer installing the PWA, and it has no
 	// way to attach an API key to those requests. Serve them without auth so

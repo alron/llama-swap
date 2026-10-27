@@ -650,11 +650,16 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		sendUIConfig := func() {
-			// The UI hides its Help page when the help agent is disabled.
+			// The UI hides its Help page when the help agent is disabled,
+			// and shows a logout button only when there is a form login.
+			type uiAuth struct {
+				FormLogin bool `json:"formLogin"`
+			}
 			uiConfig := struct {
 				config.UIConfig
 				HelpAgent config.HelpAgentConfig `json:"helpagent"`
-			}{s.cfg.UI, s.cfg.HelpAgent}
+				Auth      uiAuth                 `json:"auth"`
+			}{s.cfg.UI, s.cfg.HelpAgent, uiAuth{FormLogin: s.cfg.FormLoginEnabled()}}
 			if j, err := json.Marshal(uiConfig); err == nil {
 				send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
 			}

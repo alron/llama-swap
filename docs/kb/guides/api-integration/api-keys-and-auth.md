@@ -1,10 +1,10 @@
 ---
 title: API keys, access control, and keeping secrets out of your config
-summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets.
+summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets; security.auth.mode form gives browsers a login page.
 category: guides
-tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control]
-config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env]
-updated: 2026-08-25
+tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control, login, password-manager, session, cookie]
+config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL]
+updated: 2026-10-27
 ---
 
 # API keys and keeping secrets out of your config
@@ -45,6 +45,47 @@ front of llama-swap when you need those controls.
 **`apiKeys` is not a substitute for a firewall.** llama-swap starts processes
 on your machine. Do not expose it to the internet on the strength of a bearer
 token alone.
+
+## Logging in from a browser
+
+By default a browser without a key gets a Basic auth challenge and shows its
+native login dialog; the key goes in the password field. Password managers
+often fail to fill that dialog. Form mode replaces it with a login page:
+
+```yaml
+apiKeys:
+  - "${env.LLAMA_SWAP_KEY}"
+security:
+  auth:
+    mode: form        # default: basic
+    sessionTTL: 604800 # seconds, default 7 days
+```
+
+Opening the UI now redirects to `/ui/login`. Enter one of the `apiKeys` as the
+API key. A successful login sets a session cookie, and the sidebar gets a
+logout button.
+
+API clients are unaffected: `Authorization: Bearer`, `x-api-key` and Basic auth
+keep working, and a request without a key from anything other than a browser
+still gets the Basic challenge.
+
+Things to know:
+
+- **Form mode requires `apiKeys`.** Without a key the config fails to load.
+- **Sessions survive restarts and config reloads.** To log every browser out,
+  remove or rotate the key it logged in with; a config reload is enough.
+  Logging out only clears that browser's cookie.
+- **Instances on one host share a login when they share a key.** Cookies are
+  per host, not per port or path, so llama-swap names the cookie after a
+  fingerprint of the key. Instances with different keys keep separate logins.
+- **The login does not stick over plain HTTP if the proxy says HTTPS.** The
+  cookie is marked `Secure` when llama-swap serves TLS itself or a proxy sends
+  `X-Forwarded-Proto: https`, and browsers then refuse to send it over plain
+  HTTP.
+- **Links from other sites work, embedding does not.** The session cookie only
+  authenticates the UI's own requests and top-level page loads. A page on
+  another site or port cannot use it to call the API, and the UI shown inside
+  another site's frame asks for a login.
 
 ## Keep the keys out of the file
 

@@ -278,6 +278,9 @@ groups:
 		Upstream: UpstreamConfig{
 			IgnorePaths: DefaultUpstreamIgnorePaths(),
 		},
+		Security: SecurityConfig{
+			Auth: AuthConfig{Mode: AuthModeBasic, SessionTTL: DefaultSessionTTL},
+		},
 		Routing: RoutingConfig{
 			Router: RouterConfig{
 				Use: "group",

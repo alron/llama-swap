@@ -374,3 +374,59 @@ func TestConfig_IsHTTPToken(t *testing.T) {
 		}
 	}
 }
+
+// TestConfig_SecurityAuthDefaults pins that a config without security.auth
+// keeps the Basic challenge llama-swap always sent, and that form mode gets
+// the seven-day session when sessionTTL is left out.
+func TestConfig_SecurityAuthDefaults(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if cfg.Security.Auth.Mode != AuthModeBasic {
+		t.Errorf("mode = %q, want %q", cfg.Security.Auth.Mode, AuthModeBasic)
+	}
+	if cfg.FormLoginEnabled() {
+		t.Error("FormLoginEnabled() = true without security.auth")
+	}
+
+	cfg, err = LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if cfg.Security.Auth.SessionTTL != DefaultSessionTTL {
+		t.Errorf("sessionTTL = %d, want %d", cfg.Security.Auth.SessionTTL, DefaultSessionTTL)
+	}
+	if !cfg.FormLoginEnabled() {
+		t.Error("FormLoginEnabled() = false with mode form and apiKeys")
+	}
+}
+
+// TestConfig_SecurityAuthRejected covers settings that cannot work: an
+// unknown mode, a negative lifetime, and a login form with no key to log in
+// with.
+func TestConfig_SecurityAuthRejected(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	tests := map[string]struct {
+		yaml string
+		want string
+	}{
+		"unknown mode":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
+		"negative sessionTTL":  {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
+		"form without apiKeys": {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.yaml))
+			if err == nil {
+				t.Fatal("LoadConfigFromReader accepted the config")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}

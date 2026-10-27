@@ -35,9 +35,58 @@ func DefaultCORSAllowedHeaders() []string {
 	return []string{"Content-Type", "Authorization", "Accept", "X-Requested-With"}
 }
 
+// Values for security.auth.mode.
+const (
+	// AuthModeBasic answers a browser missing an API key with a Basic auth
+	// challenge, which makes it show its native login dialog.
+	AuthModeBasic = "basic"
+	// AuthModeForm sends a browser missing an API key to a login page that
+	// exchanges the key for a session cookie.
+	AuthModeForm = "form"
+)
+
+// DefaultSessionTTL is the security.auth.sessionTTL used when it is not set:
+// seven days, in seconds.
+const DefaultSessionTTL = 7 * 24 * 60 * 60
+
 // SecurityConfig groups settings that control who may talk to llama-swap.
 type SecurityConfig struct {
 	CORS CORSConfig `yaml:"cors"`
+	Auth AuthConfig `yaml:"auth"`
+}
+
+// AuthConfig controls how a browser is asked for one of the apiKeys. It does
+// not change what is accepted: a key in the Authorization or x-api-key header
+// works in either mode, so API clients are unaffected by the choice.
+type AuthConfig struct {
+	// Mode is AuthModeBasic (the default) or AuthModeForm. Form mode requires
+	// apiKeys, since there is otherwise nothing to log in with.
+	Mode string `yaml:"mode"`
+
+	// SessionTTL is how long in seconds a form login lasts before the browser
+	// must log in again. 0 means DefaultSessionTTL. Ignored in basic mode.
+	SessionTTL int `yaml:"sessionTTL"`
+}
+
+// Validate reports an unknown mode or a negative session lifetime. Defaults
+// are applied by the loader before this runs.
+func (c AuthConfig) Validate() error {
+	switch c.Mode {
+	case AuthModeBasic, AuthModeForm:
+	default:
+		return fmt.Errorf("mode: %q is not valid, use %q or %q", c.Mode, AuthModeBasic, AuthModeForm)
+	}
+	if c.SessionTTL < 0 {
+		return fmt.Errorf("sessionTTL must be >= 0")
+	}
+	return nil
+}
+
+// FormLoginEnabled reports whether browsers log in through the login form.
+// The loader already rejects form mode without apiKeys; checking the keys here
+// too keeps a Config built directly in Go from serving a login nothing passes.
+func (c Config) FormLoginEnabled() bool {
+	return c.Security.Auth.Mode == AuthModeForm && len(c.RequiredAPIKeys) > 0
 }
 
 // CORSConfig controls the Access-Control-* headers llama-swap sends.
