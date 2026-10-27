@@ -41,7 +41,8 @@ const (
 	// challenge, which makes it show its native login dialog.
 	AuthModeBasic = "basic"
 	// AuthModeForm sends a browser missing an API key to a login page that
-	// exchanges the key for a session cookie.
+	// exchanges the key for a session cookie. Browsers never see a Basic
+	// challenge in this mode, and Basic credentials they send are ignored.
 	AuthModeForm = "form"
 )
 
@@ -59,9 +60,10 @@ type SecurityConfig struct {
 	Auth AuthConfig `yaml:"auth"`
 }
 
-// AuthConfig controls how a browser is asked for one of the apiKeys. It does
-// not change what is accepted: a key in the Authorization or x-api-key header
-// works in either mode, so API clients are unaffected by the choice.
+// AuthConfig controls how a browser is asked for one of the apiKeys. API
+// clients are unaffected by the choice: a key sent as Bearer, x-api-key or
+// Basic auth works in either mode. Only browsers change, and in form mode they
+// log in through the form rather than with Basic auth.
 type AuthConfig struct {
 	// Mode is AuthModeBasic (the default) or AuthModeForm. Form mode requires
 	// apiKeys, since there is otherwise nothing to log in with.

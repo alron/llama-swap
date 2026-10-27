@@ -68,7 +68,10 @@ logout button.
 
 API clients are unaffected: `Authorization: Bearer`, `x-api-key` and Basic auth
 keep working, and a request without a key from anything other than a browser
-still gets the Basic challenge.
+still gets the Basic challenge. Browsers never see the Basic dialog in form
+mode, and Basic credentials a browser sends are ignored. Otherwise a browser
+that cached them, say from before you switched to form mode, would stay logged
+in after logging out.
 
 Things to know:
 
@@ -90,8 +93,8 @@ Things to know:
   share a login only when they share both `sessionSecret` and the key.
 - **The session only works from this instance's own pages.** Requests that a
   page on another site or port makes the browser send get a 403, and
-  `GET /unload` always needs an API key. Links from elsewhere still open the
-  UI, and a link to `/upstream/<model>/` still loads that model.
+  `GET /unload` always needs an API key in a header. Links from elsewhere still
+  open the UI, and a link to `/upstream/<model>/` still loads that model.
 - **Plain HTTP on a LAN address is less strict.** Browsers send their
   `Sec-Fetch-*` headers only over HTTPS and to localhost. Without them
   llama-swap checks `Origin` and `Referer` instead, but cannot tell a page

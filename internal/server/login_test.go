@@ -110,6 +110,14 @@ func TestServer_AuthMiddleware_BasicModeUnchanged(t *testing.T) {
 		},
 		wantCode:  http.StatusUnauthorized,
 		challenge: true,
+	}, {
+		name: "browser with Basic auth",
+		req: func() *http.Request {
+			r := browserRequest(http.MethodGet, "/ui/", "none", "navigate", "document")
+			r.SetBasicAuth("anyone", "secret")
+			return r
+		},
+		wantCode: http.StatusOK,
 	}})
 }
 
@@ -139,6 +147,34 @@ func TestServer_AuthMiddleware_FormMode(t *testing.T) {
 			req: func() *http.Request {
 				r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusOK,
+		},
+		{
+			// Possibly cached from the native dialog; logging out must work.
+			name: "basic auth from a browser page load is ignored",
+			req: func() *http.Request {
+				r := browserRequest(http.MethodGet, "/ui/", "none", "navigate", "document")
+				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusSeeOther,
+		},
+		{
+			name: "basic auth on a browser fetch is ignored",
+			req: func() *http.Request {
+				r := browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")
+				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			name: "bearer from a browser still accepted",
+			req: func() *http.Request {
+				r := browserRequest(http.MethodGet, "/v1/models", "cross-site", "cors", "empty")
+				r.Header.Set("Authorization", "Bearer secret")
 				return r
 			},
 			wantCode: http.StatusOK,
@@ -362,6 +398,15 @@ func TestServer_AuthMiddleware_PlainHTTP(t *testing.T) {
 		{
 			name:     "page load without credentials",
 			req:      func() *http.Request { return plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "") },
+			wantCode: http.StatusSeeOther,
+		},
+		{
+			name: "page load with cached Basic auth",
+			req: func() *http.Request {
+				r := plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "")
+				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
 			wantCode: http.StatusSeeOther,
 		},
 	})
@@ -664,26 +709,74 @@ func TestServer_Login_OnlyInFormMode(t *testing.T) {
 }
 
 // TestServer_Unload_IgnoresSessionCookie pins that GET /unload, which acts on
-// a plain GET any page can make a browser send, takes API keys only.
+// a plain GET any page can make a browser send, takes API keys in a header
+// only, and that in form mode a browser is neither shown the Basic dialog nor
+// sent to the login page, which would only send it back here in a loop.
 func TestServer_Unload_IgnoresSessionCookie(t *testing.T) {
 	cfg := formLoginConfig("secret")
 	s := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
 	session := sessionCookieFor(newSessionAuth(cfg), "secret", time.Now().Add(time.Hour))
 
-	r := browserRequest(http.MethodGet, "/unload", "same-origin", "navigate", "document")
-	r.AddCookie(session)
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("with session cookie: status = %d, want 401", w.Code)
+	tests := []struct {
+		name      string
+		req       func() *http.Request
+		wantCode  int
+		challenge bool
+	}{
+		{
+			name: "browser page load with a session",
+			req: func() *http.Request {
+				r := browserRequest(http.MethodGet, "/unload", "same-origin", "navigate", "document")
+				r.AddCookie(session)
+				return r
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			name: "browser with Basic auth",
+			req: func() *http.Request {
+				r := plainHTTPRequest(http.MethodGet, "/unload", "text/html", "", "")
+				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			name: "API client with Bearer",
+			req: func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/unload", nil)
+				r.Header.Set("Authorization", "Bearer secret")
+				return r
+			},
+			wantCode: http.StatusOK,
+		},
+		{
+			name: "API client with Basic auth",
+			req: func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/unload", nil)
+				r.SetBasicAuth("anyone", "secret")
+				return r
+			},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:      "API client without a key",
+			req:       func() *http.Request { return httptest.NewRequest(http.MethodGet, "/unload", nil) },
+			wantCode:  http.StatusUnauthorized,
+			challenge: true,
+		},
 	}
-
-	r = httptest.NewRequest(http.MethodGet, "/unload", nil)
-	r.Header.Set("Authorization", "Bearer secret")
-	w = httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	if w.Code == http.StatusUnauthorized {
-		t.Error("with API key: status = 401")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, tt.req())
+			if w.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
+			}
+			if got := w.Header().Get("WWW-Authenticate") != ""; got != tt.challenge {
+				t.Errorf("WWW-Authenticate present = %v, want %v", got, tt.challenge)
+			}
+		})
 	}
 }
 
@@ -813,7 +906,11 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 			r := browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")
 			r.AddCookie(sessionCookieSince(sa, "secret", tt.login, tt.expiry))
 			w := httptest.NewRecorder()
-			createAuthMiddleware(tt.cfg.RequiredAPIKeys, sa, tt.renew)(final).ServeHTTP(w, r)
+			use := sessionWatches
+			if tt.renew {
+				use = sessionRenews
+			}
+			createAuthMiddleware(tt.cfg.RequiredAPIKeys, sa, use)(final).ServeHTTP(w, r)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", w.Code)

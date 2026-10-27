@@ -981,7 +981,7 @@
                                 "form"
                             ],
                             "default": "basic",
-                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better. Basic auth, Bearer and x-api-key keep working in both modes. 'form' requires apiKeys."
+                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
                         },
                         "sessionTTL": {
                             "type": "integer",
