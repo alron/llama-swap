@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -26,6 +28,10 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 // createAuthMiddleware is CreateAuthMiddleware with the session check passed
 // in, so routes can share one and leave it out of routes that must not accept
 // the cookie. A nil sessions accepts API keys only.
+//
+// A request authenticated only by the cookie ends when the session does, so
+// a long-lived one such as the UI's event stream cannot outlast it. The UI
+// notices the stream close and goes to the login page.
 func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		if len(keys) == 0 {
@@ -33,10 +39,10 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, valid := matchAPIKey(keys, swaputil.ExtractAPIKey(r))
-			session := sessionNone
+			session, expiry := sessionNone, time.Time{}
 			browser := false
 			if sessions != nil {
-				session = sessions.check(r)
+				session, expiry = sessions.check(r)
 				browser = isBrowserRequest(r)
 			}
 			// Strip in every mode: a cookie left over from form mode is no
@@ -44,8 +50,12 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware
 			stripSessionCookies(r.Header)
 
 			switch {
-			case valid || session == sessionValid:
+			case valid:
 				next.ServeHTTP(w, r)
+			case session == sessionValid:
+				ctx, cancel := context.WithDeadline(r.Context(), expiry)
+				defer cancel()
+				next.ServeHTTP(w, r.WithContext(ctx))
 			case session == sessionRefused:
 				// 403, not 401: the browser is logged in, and a 401 would send
 				// the UI back to the login page in a loop.
@@ -57,6 +67,9 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth) chain.Middleware
 					redirectRelative(w, loginRedirect(r), http.StatusSeeOther)
 					return
 				}
+				// Marks this as llama-swap's own "log in" answer, so the UI
+				// can tell it from a 401 an upstream or peer passes through.
+				w.Header().Set(loginRequiredHeader, "required")
 				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: log in or provide an API key")
 			default:
 				w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)

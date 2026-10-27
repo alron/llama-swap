@@ -669,3 +669,89 @@ func TestServer_Unload_IgnoresSessionCookie(t *testing.T) {
 		t.Error("with API key: status = 401")
 	}
 }
+
+// TestServer_AuthMiddleware_LoginRequiredHeader pins that only llama-swap's
+// own "log in" answer to a browser carries the marker the UI acts on, so a
+// 401 passed through from an upstream or peer never sends it to the login page.
+func TestServer_AuthMiddleware_LoginRequiredHeader(t *testing.T) {
+	cfg := formLoginConfig("secret")
+	sa := newSessionAuth(cfg)
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mw := CreateAuthMiddleware(cfg)(final)
+
+	refused := plainHTTPRequest(http.MethodGet, "/upstream/m1/", "image/*", "", "http://example.com:9000/")
+	refused.AddCookie(sessionCookieFor(sa, "secret", time.Now().Add(time.Hour)))
+
+	tests := map[string]struct {
+		req  *http.Request
+		want string
+	}{
+		"browser fetch without a session": {plainHTTPRequest(http.MethodGet, "/api/version", "*/*", "", "http://example.com/ui/"), "required"},
+		"API client without a key":        {httptest.NewRequest(http.MethodGet, "/v1/models", nil), ""},
+		"valid session refused":           {refused, ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			mw.ServeHTTP(w, tt.req)
+			if got := w.Header().Get(loginRequiredHeader); got != tt.want {
+				t.Errorf("%s = %q, want %q (status %d)", loginRequiredHeader, got, tt.want, w.Code)
+			}
+		})
+	}
+}
+
+// TestServer_AuthMiddleware_SessionEndsRequests pins that a request
+// authenticated only by the session cookie ends when the session does, so
+// the UI's event stream cannot keep a logged-out UI looking alive.
+func TestServer_AuthMiddleware_SessionEndsRequests(t *testing.T) {
+	cfg := formLoginConfig("secret")
+	sa := newSessionAuth(cfg)
+	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
+
+	var deadline time.Time
+	var hasDeadline bool
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadline, hasDeadline = r.Context().Deadline()
+	})
+	mw := CreateAuthMiddleware(cfg)(final)
+
+	r := browserRequest(http.MethodGet, "/api/events", "same-origin", "cors", "empty")
+	r.AddCookie(sessionCookieFor(sa, "secret", expiry))
+	mw.ServeHTTP(httptest.NewRecorder(), r)
+	if !hasDeadline || !deadline.Equal(expiry) {
+		t.Errorf("cookie request deadline = %v (set %v), want %v", deadline, hasDeadline, expiry)
+	}
+
+	r = httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	mw.ServeHTTP(httptest.NewRecorder(), r)
+	if hasDeadline {
+		t.Errorf("API key request got a deadline of %v", deadline)
+	}
+}
+
+// TestServer_APIEvents_EndsWithSession runs the real event stream with a
+// session about to expire and checks the stream closes on its own.
+func TestServer_APIEvents_EndsWithSession(t *testing.T) {
+	cfg := formLoginConfig("secret")
+	s := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	r := browserRequest(http.MethodGet, "/api/events", "same-origin", "cors", "empty")
+	r.AddCookie(sessionCookieFor(newSessionAuth(cfg), "secret", time.Now().Add(2*time.Second)))
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		s.ServeHTTP(w, r)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("event stream still open after the session expired")
+	}
+	if !strings.Contains(w.Body.String(), `"type":"modelStatus"`) {
+		t.Errorf("stream never started; body=%q", w.Body.String())
+	}
+}

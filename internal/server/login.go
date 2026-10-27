@@ -40,7 +40,7 @@ func renderLogin(w http.ResponseWriter, status int, data loginPageData) {
 // already holds a valid session goes straight on to where it was headed.
 func (sa *sessionAuth) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	next := r.URL.Query().Get("next")
-	if sa.check(r) == sessionValid {
+	if state, _ := sa.check(r); state == sessionValid {
 		redirectRelative(w, loginReturnPath(next), http.StatusSeeOther)
 		return
 	}

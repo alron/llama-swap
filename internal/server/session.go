@@ -25,6 +25,10 @@ import (
 // overwrites another's login.
 const sessionCookiePrefix = "llama_swap_session_"
 
+// loginRequiredHeader is set on the 401 a browser gets when it has no valid
+// session. The UI goes to the login page when it sees it.
+const loginRequiredHeader = "X-Llama-Swap-Login"
+
 // processSessionSecret signs sessions when security.auth.sessionSecret is not
 // set. It lives as long as the process: a config reload builds a new Server
 // but keeps this, so a reload keeps browsers logged in and a restart logs
@@ -111,22 +115,32 @@ func (sa *sessionAuth) newCookie(r *http.Request, key string) *http.Cookie {
 	}
 }
 
-// validCookie reports whether a cookie carries an unexpired session for one
-// of the configured keys.
-func (sa *sessionAuth) validCookie(c *http.Cookie) bool {
+// sessionExpiry returns when the session in c ends, and whether c carries an
+// unexpired session for one of the configured keys at all.
+func (sa *sessionAuth) sessionExpiry(c *http.Cookie) (time.Time, bool) {
 	key, ok := sa.byCookie[c.Name]
 	if !ok {
-		return false
+		return time.Time{}, false
 	}
 	expiryText, sig, ok := strings.Cut(c.Value, ".")
 	if !ok {
-		return false
+		return time.Time{}, false
 	}
 	expiry, err := strconv.ParseInt(expiryText, 10, 64)
 	if err != nil || sa.now().Unix() >= expiry {
-		return false
+		return time.Time{}, false
 	}
-	return hmac.Equal([]byte(sig), []byte(sa.signature(key, expiry)))
+	if !hmac.Equal([]byte(sig), []byte(sa.signature(key, expiry))) {
+		return time.Time{}, false
+	}
+	return time.Unix(expiry, 0), true
+}
+
+// validCookie reports whether c carries an unexpired session for one of the
+// configured keys.
+func (sa *sessionAuth) validCookie(c *http.Cookie) bool {
+	_, ok := sa.sessionExpiry(c)
+	return ok
 }
 
 // sessionState is what a request's session cookie amounts to.
@@ -144,17 +158,21 @@ const (
 	sessionRefused
 )
 
-// check reports what r's session cookie amounts to; see sessionRequestAllowed.
-func (sa *sessionAuth) check(r *http.Request) sessionState {
+// check reports what r's session cookie amounts to, see
+// sessionRequestAllowed, and when a valid session ends.
+func (sa *sessionAuth) check(r *http.Request) (sessionState, time.Time) {
 	for _, c := range r.Cookies() {
-		if strings.HasPrefix(c.Name, sessionCookiePrefix) && sa.validCookie(c) {
+		if !strings.HasPrefix(c.Name, sessionCookiePrefix) {
+			continue
+		}
+		if expiry, ok := sa.sessionExpiry(c); ok {
 			if sessionRequestAllowed(r) {
-				return sessionValid
+				return sessionValid, expiry
 			}
-			return sessionRefused
+			return sessionRefused, expiry
 		}
 	}
-	return sessionNone
+	return sessionNone, time.Time{}
 }
 
 // sessionRequestAllowed reports whether r may authenticate with the session
