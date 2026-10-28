@@ -988,7 +988,7 @@
                             "minimum": 0,
                             "maximum": 17280000,
                             "default": 604800,
-                            "description": "How long in seconds a form login lasts without being used. Loading a page or a request that changes something (POST, PUT, PATCH, DELETE) renews the session once less than half of this is left, up to sessionMaxLifetime; background GETs such as polling do not. At most 17280000 (200 days), since browsers keep a cookie at most 400 days; 0 means that maximum. Default 604800 (7 days) when not set. Ignored in basic mode."
+                            "description": "How long in seconds a form login lasts without being used. Loading a page or a request that changes something (POST, PUT, PATCH, DELETE) renews the session for a full sessionTTL, up to sessionMaxLifetime; background GETs such as polling do not. At most 17280000 (200 days), since browsers keep a cookie at most 400 days; 0 means that maximum. Default 604800 (7 days) when not set. Ignored in basic mode."
                         },
                         "sessionMaxLifetime": {
                             "type": "integer",

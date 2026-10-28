@@ -895,10 +895,11 @@ func TestServer_APIEvents_EndsWithSession(t *testing.T) {
 	}
 }
 
-// TestServer_AuthMiddleware_RenewsSession pins renewal on activity: a session
-// past half its ttl is extended by a page load or a request that changes
-// something, never past the lifetime cap measured from login, and a script's
-// GET, such as a page polling for status, never extends it.
+// TestServer_AuthMiddleware_RenewsSession pins renewal on activity: a page
+// load or a request that changes something extends the session to a full ttl
+// from now, however recently it was last renewed, never past the lifetime cap
+// measured from login, and a script's GET, such as a page polling for status,
+// never extends it.
 func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 	const ttl = 3600
 	now := time.Unix(1_800_000_000, 0)
@@ -931,7 +932,8 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 	}{
 		{"chat past halfway", withCap(month), chat, at(-1000), at(1000), at(ttl)},
 		{"page load past halfway", withCap(month), pageLoad, at(-1000), at(1000), at(ttl)},
-		{"chat before halfway", withCap(month), chat, at(-600), at(3000), time.Time{}},
+		{"chat soon after the last renewal", withCap(month), chat, at(-600), at(3000), at(ttl)},
+		{"chat in the same second as a renewal", withCap(month), chat, at(-600), at(ttl), time.Time{}},
 		{"renewal trimmed to the cap", withCap(7200), chat, at(-7000), at(100), at(200)},
 		{"already at the cap", withCap(7200), chat, at(-7150), at(50), time.Time{}},
 		{"no cap", withCap(0), chat, at(-100 * 24 * 3600), at(10), at(ttl)},

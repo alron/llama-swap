@@ -144,16 +144,13 @@ func (sa *sessionAuth) expiryFrom(login, now time.Time) time.Time {
 	return time.Unix(expiry.Unix(), 0)
 }
 
-// renew extends s when less than half its ttl is left, so a browser in use
-// stays logged in. Renewing only past the halfway point keeps most requests
-// from setting a cookie, and the cap stops a session, stolen or not, from
-// being kept alive forever. It reports whether s changed.
+// renew extends s to a full ttl from now, so a browser stays logged in for
+// ttl after the last thing its user did. It is only called for activity (see
+// isActivity), which is rare enough that setting a cookie each time costs
+// nothing. The cap stops a session, stolen or not, from being kept alive
+// forever. It reports whether s changed.
 func (sa *sessionAuth) renew(s session) (session, bool) {
-	now := sa.now()
-	if s.expiry.Sub(now) >= sa.ttl/2 {
-		return s, false
-	}
-	expiry := sa.expiryFrom(s.login, now)
+	expiry := sa.expiryFrom(s.login, sa.now())
 	if !expiry.After(s.expiry) {
 		return s, false
 	}

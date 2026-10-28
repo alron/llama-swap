@@ -270,7 +270,7 @@ security:
     # - optional, default: 604800 (7 days)
     # - at most 17280000 (200 days); 0 means that maximum
     # - loading a page or doing something (a chat, unloading a model) renews
-    #   the session once less than half is left; background requests such as
+    #   the session for a full sessionTTL; background requests such as
     #   polling do not, so an idle open tab still logs out
     # - ignored in basic mode
     sessionTTL: 604800
