@@ -983,7 +983,7 @@ func TestPeer_ServeHTTP_AuthChallengeOnlyForAPIClients(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			ctx := swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"})
 			if browser {
-				ctx = swaputil.WithoutAuthChallenge(ctx)
+				ctx = swaputil.WithFormLoginBrowser(ctx)
 			}
 			*req = *req.WithContext(ctx)
 			w := httptest.NewRecorder()

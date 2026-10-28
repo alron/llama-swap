@@ -981,7 +981,7 @@
                                 "form"
                             ],
                             "default": "basic",
-                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. A request counts as a browser's when it carries Sec-Fetch-*, Origin or Referer headers or a session cookie, or asks for HTML. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
+                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. A request counts as a browser's when it carries Sec-Fetch-*, Origin or Referer headers or a session cookie, or asks for HTML. Other sites cannot frame llama-swap's pages in this mode. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
                         },
                         "sessionTTL": {
                             "type": "integer",

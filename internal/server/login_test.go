@@ -913,7 +913,21 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 	chat := func() *http.Request {
 		return browserRequest(http.MethodPost, "/v1/chat/completions", "same-origin", "cors", "empty")
 	}
-	pageLoad := func() *http.Request { return plainHTTPRequest(http.MethodGet, "/upstream/m1/", "text/html", "", "") }
+	typedHTTPS := func() *http.Request {
+		return browserRequest(http.MethodGet, "/ui/", "none", "navigate", "document")
+	}
+	inAppLink := func() *http.Request {
+		return plainHTTPRequest(http.MethodGet, "/upstream/m1/", "text/html", "", "http://example.com/ui/")
+	}
+	// Over plain HTTP, all three look like page loads and are accepted, but
+	// only the one with this instance as its Referer is provably the user's.
+	typedHTTP := func() *http.Request { return plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "") }
+	otherPort := func() *http.Request {
+		return plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "http://example.com:9000/")
+	}
+	linkFromElsewhere := func() *http.Request {
+		return browserRequest(http.MethodGet, "/ui/", "same-site", "navigate", "document")
+	}
 	poll := func() *http.Request {
 		return plainHTTPRequest(http.MethodGet, "/upstream/m1/props", "*/*", "", "http://example.com/upstream/m1/")
 	}
@@ -931,7 +945,11 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 		wantExpiry time.Time // zero means no new cookie
 	}{
 		{"chat past halfway", withCap(month), chat, at(-1000), at(1000), at(ttl)},
-		{"page load past halfway", withCap(month), pageLoad, at(-1000), at(1000), at(ttl)},
+		{"typed address over HTTPS", withCap(month), typedHTTPS, at(-1000), at(1000), at(ttl)},
+		{"link within llama-swap over plain HTTP", withCap(month), inAppLink, at(-1000), at(1000), at(ttl)},
+		{"page load with no Referer over plain HTTP", withCap(month), typedHTTP, at(-1000), at(1000), time.Time{}},
+		{"page load from another port over plain HTTP", withCap(0), otherPort, at(-1000), at(1000), time.Time{}},
+		{"link from another site", withCap(month), linkFromElsewhere, at(-1000), at(1000), time.Time{}},
 		{"chat soon after the last renewal", withCap(month), chat, at(-600), at(3000), at(ttl)},
 		{"chat in the same second as a renewal", withCap(month), chat, at(-600), at(ttl), time.Time{}},
 		{"renewal trimmed to the cap", withCap(7200), chat, at(-7000), at(100), at(200)},
@@ -1042,7 +1060,7 @@ func TestServer_AuthMiddleware_MarksBrowsersForChallengeStripping(t *testing.T) 
 			var stripped bool
 			final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				resp := &http.Response{Header: http.Header{"Www-Authenticate": {"Basic"}}, Request: r}
-				swaputil.StripAuthChallenge(resp)
+				swaputil.FilterFormLoginResponse(resp)
 				stripped = resp.Header.Get("WWW-Authenticate") == ""
 			})
 			r := httptest.NewRequest(http.MethodGet, "/upstream/m1/", nil)
@@ -1094,5 +1112,51 @@ func TestServer_SessionTTLZeroIsMaximum(t *testing.T) {
 	c := sa.cookie(httptest.NewRequest(http.MethodPost, "/ui/login", nil), sa.start("secret"))
 	if c.MaxAge != config.MaxSessionTTL {
 		t.Errorf("cookie Max-Age = %d, want %d", c.MaxAge, config.MaxSessionTTL)
+	}
+}
+
+// TestServer_AuthMiddleware_FrameHeaders pins that under form login no other
+// site may frame llama-swap's pages: over plain HTTP a framed page load looks
+// like a top-level one, so a page on another port could otherwise load the UI
+// hidden and let its own requests renew the session. API clients and basic
+// mode get no frame headers.
+func TestServer_AuthMiddleware_FrameHeaders(t *testing.T) {
+	sa := newSessionAuth(formLoginConfig("secret"))
+	session := sessionCookieFor(sa, "secret", time.Now().Add(time.Hour))
+	tests := []struct {
+		name  string
+		cfg   config.Config
+		req   func() *http.Request
+		frame bool
+	}{
+		{"form mode, logged-in page load", formLoginConfig("secret"), func() *http.Request {
+			r := plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "")
+			r.AddCookie(session)
+			return r
+		}, true},
+		{"form mode, redirect to login", formLoginConfig("secret"), func() *http.Request {
+			return plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "")
+		}, true},
+		{"form mode, API client", formLoginConfig("secret"), func() *http.Request {
+			r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			r.Header.Set("Authorization", "Bearer secret")
+			return r
+		}, false},
+		{"basic mode, browser", config.Config{RequiredAPIKeys: []string{"secret"}}, func() *http.Request {
+			r := plainHTTPRequest(http.MethodGet, "/ui/", "text/html", "", "")
+			r.SetBasicAuth("anyone", "secret")
+			return r
+		}, false},
+	}
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			CreateAuthMiddleware(tt.cfg)(final).ServeHTTP(w, tt.req())
+			xfo, csp := w.Header().Get("X-Frame-Options"), w.Header().Get("Content-Security-Policy")
+			if got := xfo == "SAMEORIGIN" && csp == "frame-ancestors 'self'"; got != tt.frame {
+				t.Errorf("X-Frame-Options = %q, Content-Security-Policy = %q; frame headers set = %v, want %v (status %d)", xfo, csp, got, tt.frame, w.Code)
+			}
+		})
 	}
 }

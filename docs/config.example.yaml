@@ -262,7 +262,8 @@ security:
     # - basic: the browser shows its native login dialog
     # - form: the browser is sent to a login page at /ui/login, which password
     #   managers fill reliably; the password is one of the apiKeys. Browsers
-    #   never get the Basic dialog, and Basic credentials they send are ignored
+    #   never get the Basic dialog, and Basic credentials they send are ignored.
+    #   Other sites cannot frame llama-swap's pages in this mode
     # - form requires apiKeys
     mode: basic
 

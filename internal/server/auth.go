@@ -65,7 +65,16 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 			}
 			_, valid := matchAPIKey(keys, provided)
 			if browser {
-				r = r.WithContext(swaputil.WithoutAuthChallenge(r.Context()))
+				r = r.WithContext(swaputil.WithFormLoginBrowser(r.Context()))
+				// No other site may frame llama-swap's pages, proxied ones
+				// included. Over plain HTTP a framed page load cannot be told
+				// from a top-level one, so without this a page on another
+				// port could load the UI hidden and let its own requests run.
+				// The proxies drop an upstream's X-Frame-Options so this one
+				// is the only value.
+				h := w.Header()
+				h.Set("X-Frame-Options", "SAMEORIGIN")
+				h.Add("Content-Security-Policy", "frame-ancestors 'self'")
 			}
 
 			state, sess := sessionNone, session{}
@@ -80,9 +89,16 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 			case valid:
 				next.ServeHTTP(w, r)
 			case state == sessionValid:
-				if renewed, ok := sessions.renew(sess); ok && isActivity(r) {
-					sess = renewed
-					http.SetCookie(w, sessions.cookie(r, sess))
+				// Renew only for activity the headers prove came from this
+				// instance's own pages. A page load is accepted from anywhere,
+				// but over plain HTTP one sent by a page on another port looks
+				// the same as one the user typed, and must not keep a session
+				// alive.
+				if isActivity(r) && sameOriginRequest(r) {
+					if renewed, ok := sessions.renew(sess); ok {
+						sess = renewed
+						http.SetCookie(w, sessions.cookie(r, sess))
+					}
 				}
 				ctx, cancel := context.WithDeadline(r.Context(), sess.expiry)
 				defer cancel()

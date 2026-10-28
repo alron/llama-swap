@@ -126,7 +126,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			// policy. ReverseProxy adds rather than replaces headers, so keep
 			// only this instance's; see issue #85.
 			swaputil.StripUpstreamCORSHeaders(resp.Header)
-			swaputil.StripAuthChallenge(resp)
+			swaputil.FilterFormLoginResponse(resp)
 
 			// The peer is a llama-swap using form login and wants a browser
 			// login rather than this instance's key. Passing that on would

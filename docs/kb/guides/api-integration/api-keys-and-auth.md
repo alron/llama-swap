@@ -90,7 +90,8 @@ Things to know:
   `sessionMaxLifetime: 0` keeps a browser logged in indefinitely as long as it
   is used at least every 200 days. Background requests do not count: a tab left
   open on a page that polls, such as llama-server's own UI under `/upstream/`,
-  still logs out. Neither does only reading pages without reloading. When a
+  still logs out. Neither does only reading pages without reloading. A proxied
+  UI that writes on its own, say by POSTing on a timer, does count. When a
   session ends, any request still running is cut off and the UI returns to the
   login page.
 - **A restart logs browsers out; a config reload does not.** Sessions are
@@ -105,11 +106,12 @@ Things to know:
   page on another site or port makes the browser send get a 403, and
   `GET /unload` always needs an API key in a header. Links from elsewhere still
   open the UI, and a link to `/upstream/<model>/` still loads that model.
-- **Plain HTTP on a LAN address is less strict.** Browsers send their
-  `Sec-Fetch-*` headers only over HTTPS and to localhost. Without them
-  llama-swap checks `Origin` and `Referer` instead, but cannot tell a page
-  framed by another port on the same host from a normal page load. Use HTTPS
-  or localhost for full protection.
+- **Over plain HTTP, typing the address does not renew a session.** Browsers
+  send their `Sec-Fetch-*` headers only over HTTPS and to localhost. Without
+  them llama-swap checks `Origin` and `Referer` instead, and a typed address or
+  a reload looks the same as a page load another port could trigger, so it is
+  accepted but does not renew. Opening the UI, or doing anything in it, still
+  does.
 - **A peer that wants a login gives a 502.** When a peer is another llama-swap
   in form mode and `peers.<id>.apiKey` is missing or wrong, its pages answer
   with a 502 naming that setting instead of a login page.
@@ -121,9 +123,11 @@ Things to know:
   cookie is marked `Secure` when llama-swap serves TLS itself or a proxy sends
   `X-Forwarded-Proto: https`, and browsers then refuse to send it over plain
   HTTP.
-- **The UI cannot be embedded in another site's frame.** The login page
-  refuses to be framed, and over HTTPS or localhost the session is refused
-  inside one.
+- **No other site can frame llama-swap in form mode.** Its pages, `/upstream/`
+  ones included, send `frame-ancestors 'self'` and
+  `X-Frame-Options: SAMEORIGIN`, replacing an upstream's own
+  `X-Frame-Options`. So a dashboard cannot embed the UI or a model's page; open
+  it in a tab instead.
 
 ## Keep the keys out of the file
 

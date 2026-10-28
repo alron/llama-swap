@@ -11,21 +11,27 @@ import (
 // and the peer proxy uses it to recognize a peer asking for a login.
 const LoginRequiredHeader = "X-Llama-Swap-Login"
 
-type noAuthChallengeKey struct{}
+type formLoginBrowserKey struct{}
 
-// WithoutAuthChallenge marks ctx as a browser request under form login, so
-// proxied responses to it lose WWW-Authenticate; see StripAuthChallenge.
-func WithoutAuthChallenge(ctx context.Context) context.Context {
-	return context.WithValue(ctx, noAuthChallengeKey{}, true)
+// WithFormLoginBrowser marks ctx as a browser request under form login, so
+// proxied responses to it are filtered; see FilterFormLoginResponse.
+func WithFormLoginBrowser(ctx context.Context) context.Context {
+	return context.WithValue(ctx, formLoginBrowserKey{}, true)
 }
 
-// StripAuthChallenge deletes WWW-Authenticate from resp when its request was
-// marked by WithoutAuthChallenge. A browser answers that header with its
-// native Basic dialog, which form login replaces, and an upstream's or
-// peer's challenge is not one the browser's user could answer anyway. Call
-// it from httputil.ReverseProxy.ModifyResponse.
-func StripAuthChallenge(resp *http.Response) {
-	if resp.Request != nil && resp.Request.Context().Value(noAuthChallengeKey{}) != nil {
+// FilterFormLoginResponse removes from an upstream's or peer's response what
+// form login replaces, when the request was marked by WithFormLoginBrowser:
+//
+//   - WWW-Authenticate, which a browser answers with its native Basic dialog.
+//     An upstream's challenge is not one the browser's user could answer.
+//   - X-Frame-Options, because llama-swap sets its own on every response to
+//     a browser under form login, and two conflicting values would leave the
+//     browser to pick one.
+//
+// Call it from httputil.ReverseProxy.ModifyResponse.
+func FilterFormLoginResponse(resp *http.Response) {
+	if resp.Request != nil && resp.Request.Context().Value(formLoginBrowserKey{}) != nil {
 		resp.Header.Del("WWW-Authenticate")
+		resp.Header.Del("X-Frame-Options")
 	}
 }
