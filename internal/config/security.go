@@ -70,9 +70,11 @@ type AuthConfig struct {
 	Mode string `yaml:"mode"`
 
 	// SessionTTL is how long in seconds a form login lasts without being
-	// used. Using it renews the session, up to SessionMaxLifetime. 0 means
-	// DefaultSessionTTL. Ignored in basic mode.
-	SessionTTL int `yaml:"sessionTTL"`
+	// used. Using it renews the session, up to SessionMaxLifetime. Not set
+	// means DefaultSessionTTL and 0 means MaxSessionTTL, so it is a pointer
+	// to tell the two apart; read it with EffectiveSessionTTL. Ignored in
+	// basic mode.
+	SessionTTL *int `yaml:"sessionTTL"`
 
 	// SessionMaxLifetime caps in seconds how long one login can be kept alive
 	// by renewal, counted from when the browser logged in. 0 means no cap.
@@ -88,10 +90,30 @@ type AuthConfig struct {
 	SessionSecret string `yaml:"sessionSecret"`
 }
 
-// MaxSessionSeconds bounds sessionTTL and sessionMaxLifetime. Ten years is
+// MaxSessionTTL is the longest security.auth.sessionTTL, and what 0 means:
+// 200 days, in seconds. Browsers keep a cookie at most 400 days, so a longer
+// sessionTTL would not be honored as written, and after 200 days without
+// opening the UI, logging in again is reasonable.
+const MaxSessionTTL = 200 * 24 * 60 * 60
+
+// MaxSessionMaxLifetime bounds security.auth.sessionMaxLifetime. Ten years is
 // far beyond any useful session and far below the roughly 292 years at which
-// the lifetimes overflow time.Duration.
-const MaxSessionSeconds = 10 * 365 * 24 * 60 * 60
+// it would overflow time.Duration. Renewals carry a session past the
+// browser's 400-day cookie limit, so this one is not tied to it.
+const MaxSessionMaxLifetime = 10 * 365 * 24 * 60 * 60
+
+// EffectiveSessionTTL returns sessionTTL in seconds as it applies:
+// DefaultSessionTTL when not set, and MaxSessionTTL for 0.
+func (c AuthConfig) EffectiveSessionTTL() int {
+	switch {
+	case c.SessionTTL == nil:
+		return DefaultSessionTTL
+	case *c.SessionTTL == 0:
+		return MaxSessionTTL
+	default:
+		return *c.SessionTTL
+	}
+}
 
 // MinSessionSecretLength is the shortest security.auth.sessionSecret accepted.
 // The secret is all that stops a leaked session cookie from being used to
@@ -99,32 +121,41 @@ const MaxSessionSeconds = 10 * 365 * 24 * 60 * 60
 const MinSessionSecretLength = 32
 
 // Validate reports an unknown mode, a negative or inconsistent session
-// lifetime, or a short session secret. Defaults are applied by the loader
-// before this runs.
+// lifetime, or a short session secret. An unset sessionMaxLifetime is checked
+// as its default, so the loader fills that in afterwards.
 func (c AuthConfig) Validate() error {
 	switch c.Mode {
 	case AuthModeBasic, AuthModeForm:
 	default:
 		return fmt.Errorf("mode: %q is not valid, use %q or %q", c.Mode, AuthModeBasic, AuthModeForm)
 	}
-	if c.SessionTTL < 0 {
-		return fmt.Errorf("sessionTTL must be >= 0")
+	if ttl := c.SessionTTL; ttl != nil {
+		if *ttl < 0 {
+			return fmt.Errorf("sessionTTL must be >= 0")
+		}
+		if *ttl > MaxSessionTTL {
+			return fmt.Errorf("sessionTTL must be at most %d (200 days); 0 means that maximum", MaxSessionTTL)
+		}
 	}
-	if c.SessionTTL > MaxSessionSeconds {
-		return fmt.Errorf("sessionTTL must be at most %d (10 years)", MaxSessionSeconds)
+
+	maxLifetime, maxText := DefaultSessionMaxLifetime, fmt.Sprintf("%d, the default", DefaultSessionMaxLifetime)
+	if c.SessionMaxLifetime != nil {
+		maxLifetime, maxText = *c.SessionMaxLifetime, fmt.Sprint(*c.SessionMaxLifetime)
 	}
-	if maxLifetime := c.SessionMaxLifetime; maxLifetime != nil {
-		if *maxLifetime < 0 {
-			return fmt.Errorf("sessionMaxLifetime must be >= 0")
+	if maxLifetime < 0 {
+		return fmt.Errorf("sessionMaxLifetime must be >= 0")
+	}
+	if maxLifetime > MaxSessionMaxLifetime {
+		return fmt.Errorf("sessionMaxLifetime must be at most %d (10 years); use 0 for no cap", MaxSessionMaxLifetime)
+	}
+	// A cap below the session length would silently shorten every login,
+	// which is more likely a mistake than the intent.
+	if ttl := c.EffectiveSessionTTL(); maxLifetime > 0 && maxLifetime < ttl {
+		ttlText := fmt.Sprint(ttl)
+		if c.SessionTTL != nil && *c.SessionTTL == 0 {
+			ttlText = fmt.Sprintf("0, the maximum of %d", ttl)
 		}
-		if *maxLifetime > MaxSessionSeconds {
-			return fmt.Errorf("sessionMaxLifetime must be at most %d (10 years); use 0 for no cap", MaxSessionSeconds)
-		}
-		// A cap below the session length would silently shorten every
-		// login, which is more likely a mistake than the intent.
-		if *maxLifetime > 0 && *maxLifetime < c.SessionTTL {
-			return fmt.Errorf("sessionMaxLifetime (%d) is shorter than sessionTTL (%d); raise it, or set 0 for no cap", *maxLifetime, c.SessionTTL)
-		}
+		return fmt.Errorf("sessionMaxLifetime (%s) is shorter than sessionTTL (%s); raise sessionMaxLifetime, or set it to 0 for no cap", maxText, ttlText)
 	}
 	if c.SessionSecret != "" && len(c.SessionSecret) < MinSessionSecretLength {
 		return fmt.Errorf("sessionSecret must be at least %d characters; generate one with: head -c 32 /dev/urandom | base64", MinSessionSecretLength)

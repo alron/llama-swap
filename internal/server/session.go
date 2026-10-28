@@ -73,15 +73,12 @@ func newSessionAuth(cfg config.Config) *sessionAuth {
 		secret:      processSessionSecret,
 		keys:        cfg.RequiredAPIKeys,
 		byCookie:    make(map[string]string, len(cfg.RequiredAPIKeys)),
-		ttl:         time.Duration(auth.SessionTTL) * time.Second,
+		ttl:         time.Duration(auth.EffectiveSessionTTL()) * time.Second,
 		maxLifetime: config.DefaultSessionMaxLifetime * time.Second,
 		now:         time.Now,
 	}
 	if auth.SessionSecret != "" {
 		sa.secret = []byte(auth.SessionSecret)
-	}
-	if sa.ttl <= 0 {
-		sa.ttl = config.DefaultSessionTTL * time.Second
 	}
 	if auth.SessionMaxLifetime != nil {
 		sa.maxLifetime = time.Duration(*auth.SessionMaxLifetime) * time.Second
@@ -307,6 +304,20 @@ func isTopLevelPageLoad(r *http.Request) bool {
 		return isPageLoad(r) && r.Header.Get("Sec-Fetch-Dest") == "document"
 	}
 	return isPageLoad(r)
+}
+
+// isActivity reports whether r is the person at the browser doing something,
+// which renews their session: loading a page, or a request that changes
+// something, such as sending a chat or unloading a model. A script's GET is
+// not, whether it polls for status or holds open an event stream, so a tab
+// left open on a page that polls, like llama-server's own UI, still logs out.
+func isActivity(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return isPageLoad(r)
+	default:
+		return true
+	}
 }
 
 // isPageLoad reports whether r is the browser loading a page, in a tab or a

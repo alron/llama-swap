@@ -396,8 +396,8 @@ func TestConfig_SecurityAuthDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}
-	if cfg.Security.Auth.SessionTTL != DefaultSessionTTL {
-		t.Errorf("sessionTTL = %d, want %d", cfg.Security.Auth.SessionTTL, DefaultSessionTTL)
+	if got := cfg.Security.Auth.EffectiveSessionTTL(); got != DefaultSessionTTL {
+		t.Errorf("sessionTTL = %d, want %d", got, DefaultSessionTTL)
 	}
 	if got := cfg.Security.Auth.SessionMaxLifetime; got == nil || *got != DefaultSessionMaxLifetime {
 		t.Errorf("sessionMaxLifetime = %v, want %d", got, DefaultSessionMaxLifetime)
@@ -429,7 +429,8 @@ func TestConfig_SecurityAuthRejected(t *testing.T) {
 		"negative sessionTTL":                 {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
 		"form without apiKeys":                {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
 		"negative sessionMaxLifetime":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: -1\n" + models, "sessionMaxLifetime must be >= 0"},
-		"sessionTTL past the ceiling":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 315360001\n    sessionMaxLifetime: 0\n" + models, "sessionTTL must be at most"},
+		"sessionTTL past the ceiling":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 17280001\n    sessionMaxLifetime: 0\n" + models, "sessionTTL must be at most 17280000 (200 days)"},
+		"sessionTTL 0 under the default cap":  {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 0\n" + models, "sessionMaxLifetime (2592000, the default) is shorter than sessionTTL (0, the maximum of 17280000)"},
 		"sessionMaxLifetime past the ceiling": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: 9300000000\n" + models, "sessionMaxLifetime must be at most"},
 		"cap shorter than sessionTTL":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 7200\n    sessionMaxLifetime: 3600\n" + models, "shorter than sessionTTL"},
 	}
@@ -466,5 +467,25 @@ func TestConfig_SecurityAuthSessionSecret(t *testing.T) {
 	}
 	if cfg.Security.Auth.SessionSecret != secret {
 		t.Errorf("sessionSecret = %q, want %q", cfg.Security.Auth.SessionSecret, secret)
+	}
+}
+
+// TestConfig_SecurityAuthSessionTTLZeroIsMaximum pins that sessionTTL: 0 is a
+// shortcut for the longest session browsers will reliably keep, while leaving
+// it out still gives the seven-day default.
+func TestConfig_SecurityAuthSessionTTLZeroIsMaximum(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	cfg, err := LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 0\n    sessionMaxLifetime: 0\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if got := cfg.Security.Auth.EffectiveSessionTTL(); got != MaxSessionTTL {
+		t.Errorf("sessionTTL 0 applies as %d, want %d", got, MaxSessionTTL)
+	}
+	if got := cfg.Security.Auth.SessionTTL; got == nil || *got != 0 {
+		t.Errorf("sessionTTL loaded as %v, want the 0 kept as written", got)
+	}
+	if MaxSessionTTL >= 400*24*60*60 {
+		t.Errorf("MaxSessionTTL = %d is not inside the 400 days browsers keep a cookie", MaxSessionTTL)
 	}
 }

@@ -22,20 +22,17 @@ import (
 // auth never shows up in a browser. API clients keep every way of sending a
 // key, Basic included, and still get the challenge.
 func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
-	return createAuthMiddleware(cfg.RequiredAPIKeys, newSessionAuth(cfg), sessionRenews)
+	return createAuthMiddleware(cfg.RequiredAPIKeys, newSessionAuth(cfg), sessionAccepted)
 }
 
 // sessionUse is how a route treats the form login session.
 type sessionUse int
 
 const (
-	// sessionRenews accepts the session cookie, and a request counts as the
-	// browser being in use, which renews the session.
-	sessionRenews sessionUse = iota
-	// sessionWatches accepts the session cookie without renewing it. Streams
-	// that only watch, such as the UI's event stream, use it so an idle open
-	// tab still logs out.
-	sessionWatches
+	// sessionAccepted accepts the session cookie, and renews the session
+	// when a request is the person at the browser doing something; see
+	// isActivity.
+	sessionAccepted sessionUse = iota
 	// sessionIgnored accepts API keys only, for routes a page on another
 	// site could trigger with a plain GET (GET /unload).
 	sessionIgnored
@@ -83,7 +80,7 @@ func createAuthMiddleware(keys []string, sessions *sessionAuth, use sessionUse) 
 			case valid:
 				next.ServeHTTP(w, r)
 			case state == sessionValid:
-				if renewed, ok := sessions.renew(sess); ok && use == sessionRenews {
+				if renewed, ok := sessions.renew(sess); ok && isActivity(r) {
 					sess = renewed
 					http.SetCookie(w, sessions.cookie(r, sess))
 				}

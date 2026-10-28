@@ -268,8 +268,10 @@ security:
 
     # sessionTTL: seconds a form login lasts without being used
     # - optional, default: 604800 (7 days)
-    # - using the UI renews the session once less than half is left; the
-    #   UI's event stream alone does not, so an idle open tab still logs out
+    # - at most 17280000 (200 days); 0 means that maximum
+    # - loading a page or doing something (a chat, unloading a model) renews
+    #   the session once less than half is left; background requests such as
+    #   polling do not, so an idle open tab still logs out
     # - ignored in basic mode
     sessionTTL: 604800
 
@@ -277,7 +279,7 @@ security:
     #   counted from logging in
     # - optional, default: 2592000 (30 days)
     # - 0 means no cap; otherwise it must be at least sessionTTL
-    # - at most 315360000 (10 years), the same as sessionTTL
+    # - at most 315360000 (10 years)
     # - ignored in basic mode
     sessionMaxLifetime: 2592000
 

@@ -196,6 +196,7 @@ groups:
 		},
 	}
 
+	defaultTTL := DefaultSessionTTL
 	defaultMaxLifetime := DefaultSessionMaxLifetime
 	expected := Config{
 		LogLevel:      "info",
@@ -291,7 +292,7 @@ groups:
 			IgnorePaths: DefaultUpstreamIgnorePaths(),
 		},
 		Security: SecurityConfig{
-			Auth: AuthConfig{Mode: AuthModeBasic, SessionTTL: DefaultSessionTTL, SessionMaxLifetime: &defaultMaxLifetime},
+			Auth: AuthConfig{Mode: AuthModeBasic, SessionTTL: &defaultTTL, SessionMaxLifetime: &defaultMaxLifetime},
 		},
 		Routing: RoutingConfig{
 			Router: RouterConfig{

@@ -58,7 +58,7 @@ apiKeys:
 security:
   auth:
     mode: form                 # default: basic
-    sessionTTL: 604800         # idle timeout in seconds, default 7 days
+    sessionTTL: 604800         # idle timeout, default 7 days; 0 = 200 days
     sessionMaxLifetime: 2592000 # cap from login, default 30 days; 0 = no cap
 ```
 
@@ -81,13 +81,18 @@ Basic auth along with such headers is treated as a browser too; give it
 Things to know:
 
 - **Form mode requires `apiKeys`.** Without a key the config fails to load.
-- **A session lasts while it is used.** Using the UI renews it once less than
-  half of `sessionTTL` is left, so `sessionTTL` is how long a browser stays
-  logged in without being used. Renewal stops at `sessionMaxLifetime` after
-  login (`0` removes the cap). The UI's event stream does not count, but pages
-  that poll do, so a tab left open on one keeps the session alive up to the
-  cap. When a session ends, any request still running is cut off and the UI
-  returns to the login page.
+- **A session lasts while it is used.** Loading a page, or doing something
+  such as sending a chat, unloading a model or switching profiles, renews it
+  once less than half of `sessionTTL` is left. So `sessionTTL` is how long a
+  browser stays logged in without being used. Renewal stops at
+  `sessionMaxLifetime` after login (`0` removes the cap). `sessionTTL` is at
+  most 200 days, since browsers keep a cookie at most 400, and `0` means that
+  maximum: `sessionTTL: 0` with `sessionMaxLifetime: 0` keeps a browser logged
+  in indefinitely as long as it is used at least every 200 days. Background
+  requests do not count: a tab left open on a page that polls, such as
+  llama-server's own UI under `/upstream/`, still logs out. Neither does only
+  reading pages without reloading. When a session ends, any request still
+  running is cut off and the UI returns to the login page.
 - **A restart logs browsers out; a config reload does not.** Sessions are
   signed with a secret generated at startup. Set `sessionSecret` (32+
   characters, ideally `${env.*}`) to keep them across restarts. Changing it, or

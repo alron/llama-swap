@@ -15,12 +15,13 @@ import (
 )
 
 // formLoginConfig returns a config with form login enabled for keys, signing
-// sessions with the per-process secret.
+// sessions with the per-process secret, lasting an hour unused.
 func formLoginConfig(keys ...string) config.Config {
+	ttl := 3600
 	return config.Config{
 		RequiredAPIKeys: keys,
 		Security: config.SecurityConfig{
-			Auth: config.AuthConfig{Mode: config.AuthModeForm, SessionTTL: 3600},
+			Auth: config.AuthConfig{Mode: config.AuthModeForm, SessionTTL: &ttl},
 		},
 	}
 }
@@ -895,8 +896,9 @@ func TestServer_APIEvents_EndsWithSession(t *testing.T) {
 }
 
 // TestServer_AuthMiddleware_RenewsSession pins renewal on activity: a session
-// past half its ttl is extended, never past the lifetime cap measured from
-// login, and requests that only watch never extend it.
+// past half its ttl is extended by a page load or a request that changes
+// something, never past the lifetime cap measured from login, and a script's
+// GET, such as a page polling for status, never extends it.
 func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 	const ttl = 3600
 	now := time.Unix(1_800_000_000, 0)
@@ -907,20 +909,34 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 		return cfg
 	}
 
+	chat := func() *http.Request {
+		return browserRequest(http.MethodPost, "/v1/chat/completions", "same-origin", "cors", "empty")
+	}
+	pageLoad := func() *http.Request { return plainHTTPRequest(http.MethodGet, "/upstream/m1/", "text/html", "", "") }
+	poll := func() *http.Request {
+		return plainHTTPRequest(http.MethodGet, "/upstream/m1/props", "*/*", "", "http://example.com/upstream/m1/")
+	}
+	stream := func() *http.Request {
+		return browserRequest(http.MethodGet, "/api/events", "same-origin", "cors", "empty")
+	}
+	const month = 30 * 24 * 3600
+
 	tests := []struct {
 		name       string
 		cfg        config.Config
+		req        func() *http.Request
 		login      time.Time
 		expiry     time.Time
-		renew      bool
 		wantExpiry time.Time // zero means no new cookie
 	}{
-		{"past halfway", withCap(30 * 24 * 3600), at(-1000), at(1000), true, at(ttl)},
-		{"before halfway", withCap(30 * 24 * 3600), at(-600), at(3000), true, time.Time{}},
-		{"renewal trimmed to the cap", withCap(7200), at(-7000), at(100), true, at(200)},
-		{"already at the cap", withCap(7200), at(-7150), at(50), true, time.Time{}},
-		{"no cap", withCap(0), at(-100 * 24 * 3600), at(10), true, at(ttl)},
-		{"watch stream", withCap(30 * 24 * 3600), at(-1000), at(1000), false, time.Time{}},
+		{"chat past halfway", withCap(month), chat, at(-1000), at(1000), at(ttl)},
+		{"page load past halfway", withCap(month), pageLoad, at(-1000), at(1000), at(ttl)},
+		{"chat before halfway", withCap(month), chat, at(-600), at(3000), time.Time{}},
+		{"renewal trimmed to the cap", withCap(7200), chat, at(-7000), at(100), at(200)},
+		{"already at the cap", withCap(7200), chat, at(-7150), at(50), time.Time{}},
+		{"no cap", withCap(0), chat, at(-100 * 24 * 3600), at(10), at(ttl)},
+		{"page polling for status", withCap(0), poll, at(-1000), at(1000), time.Time{}},
+		{"event stream", withCap(0), stream, at(-1000), at(1000), time.Time{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -931,14 +947,10 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 			final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				deadline, _ = r.Context().Deadline()
 			})
-			r := browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")
+			r := tt.req()
 			r.AddCookie(sessionCookieSince(sa, "secret", tt.login, tt.expiry))
 			w := httptest.NewRecorder()
-			use := sessionWatches
-			if tt.renew {
-				use = sessionRenews
-			}
-			createAuthMiddleware(tt.cfg.RequiredAPIKeys, sa, use)(final).ServeHTTP(w, r)
+			createAuthMiddleware(tt.cfg.RequiredAPIKeys, sa, sessionAccepted)(final).ServeHTTP(w, r)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", w.Code)
@@ -970,26 +982,32 @@ func TestServer_AuthMiddleware_RenewsSession(t *testing.T) {
 	}
 }
 
-// TestServer_SessionRenewal_Routes runs the real router: a UI request renews a
-// session past halfway, the event stream does not, so an idle open tab still
-// expires.
+// TestServer_SessionRenewal_Routes runs the real router: an action in the UI
+// renews a session past halfway, while a background GET and the event stream
+// do not, so an idle open tab still expires.
 func TestServer_SessionRenewal_Routes(t *testing.T) {
 	cfg := formLoginConfig("secret")
 	s := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
 	cookie := sessionCookieFor(newSessionAuth(cfg), "secret", time.Now().Add(time.Minute))
 
-	r := browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")
-	r.AddCookie(cookie)
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	if len(w.Result().Cookies()) != 1 {
-		t.Errorf("GET /api/version: cookies = %v, want the session renewed", w.Result().Cookies())
+	renewed := func(r *http.Request) []string {
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Header().Values("Set-Cookie")
+	}
+
+	if got := renewed(browserRequest(http.MethodPost, "/api/models/unload", "same-origin", "cors", "empty")); len(got) != 1 {
+		t.Errorf("POST /api/models/unload: Set-Cookie = %v, want the session renewed", got)
+	}
+	if got := renewed(browserRequest(http.MethodGet, "/api/version", "same-origin", "cors", "empty")); len(got) != 0 {
+		t.Errorf("GET /api/version renewed the session: %v", got)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	r = browserRequest(http.MethodGet, "/api/events", "same-origin", "cors", "empty").WithContext(ctx)
+	r := browserRequest(http.MethodGet, "/api/events", "same-origin", "cors", "empty").WithContext(ctx)
 	r.AddCookie(cookie)
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
 		s.ServeHTTP(w, r)
@@ -1059,5 +1077,20 @@ func TestServer_SessionCapAppliesToExistingCookies(t *testing.T) {
 		if ok && tc.capSeconds > 0 && s.expiry.After(s.login.Add(time.Duration(tc.capSeconds)*time.Second)) {
 			t.Errorf("cap %ds: expiry %v is past the cap", tc.capSeconds, s.expiry)
 		}
+	}
+}
+
+// TestServer_SessionTTLZeroIsMaximum pins that the server honors
+// sessionTTL: 0 as the longest session, in the cookie it hands the browser.
+func TestServer_SessionTTLZeroIsMaximum(t *testing.T) {
+	cfg := formLoginConfig("secret")
+	zero, noCap := 0, 0
+	cfg.Security.Auth.SessionTTL = &zero
+	cfg.Security.Auth.SessionMaxLifetime = &noCap
+	sa := newSessionAuth(cfg)
+
+	c := sa.cookie(httptest.NewRequest(http.MethodPost, "/ui/login", nil), sa.start("secret"))
+	if c.MaxAge != config.MaxSessionTTL {
+		t.Errorf("cookie Max-Age = %d, want %d", c.MaxAge, config.MaxSessionTTL)
 	}
 }
