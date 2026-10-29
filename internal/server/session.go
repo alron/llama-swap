@@ -294,11 +294,21 @@ func isOwnHost(r *http.Request, host string) bool {
 }
 
 // isTopLevelPageLoad reports whether r is the browser loading a page in its
-// own tab. Without Fetch Metadata, over plain HTTP, a page loading in a frame
-// looks the same and is let through here too. Framing is still refused: the
-// auth middleware sends frame-ancestors 'self' and X-Frame-Options:
-// SAMEORIGIN on every response to a browser, which browsers enforce over
-// plain HTTP as well, so another site's frame never displays the page.
+// own tab. Without Fetch Metadata, over plain HTTP, two other requests look
+// the same and are let through here too:
+//
+//   - A page loading in a frame. Framing is still refused: the auth
+//     middleware sends frame-ancestors 'self' and X-Frame-Options:
+//     SAMEORIGIN on every response to a browser, which browsers enforce over
+//     plain HTTP as well, so another site's frame never displays the page.
+//   - A script's no-cors fetch that asks for HTML, from a page on another
+//     port of the same host (SameSite does not separate ports). It cannot
+//     read the response, and the middleware only renews a session for
+//     requests sameOriginRequest proves are from this instance, so it cannot
+//     keep a session alive. A GET with side effects, such as loading a model
+//     through /upstream/, still runs; that is the accepted cost of keeping
+//     plain HTTP usable, and cached Basic credentials allowed the same from
+//     any site.
 func isTopLevelPageLoad(r *http.Request) bool {
 	if r.Header.Get("Sec-Fetch-Mode") != "" {
 		return isPageLoad(r) && r.Header.Get("Sec-Fetch-Dest") == "document"

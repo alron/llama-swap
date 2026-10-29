@@ -81,6 +81,8 @@ Basic auth along with such headers is treated as a browser too; give it
 Things to know:
 
 - **Form mode requires `apiKeys`.** Without a key the config fails to load.
+- **The login page is not rate limited.** Neither is the API, which accepts the
+  same keys, so a guessable key is exposed either way. Use a long random key.
 - **A session lasts while it is used.** Loading a page, or doing something such
   as sending a chat, unloading a model or switching profiles, renews it for a
   full `sessionTTL`. So `sessionTTL` is how long a browser stays logged in after
@@ -108,16 +110,20 @@ Things to know:
 - **The session only works from this instance's own pages.** Requests that a
   page on another site or port makes the browser send get a 403, and
   `GET /unload` always needs an API key in a header. Links from elsewhere still
-  open the UI, and a link to `/upstream/<model>/` still loads that model.
+  open the UI, and a link to `/upstream/<model>/` still loads that model. Over
+  plain HTTP, a GET that asks for HTML looks like a page load, so a page on
+  another port of the same host can also send one, for example to load a
+  model. It cannot read the response or keep the session alive.
 - **Over plain HTTP, typing the address does not renew a session.** Browsers
   send their `Sec-Fetch-*` headers only over HTTPS and to localhost. Without
   them llama-swap checks `Origin` and `Referer` instead, and a typed address or
   a reload looks the same as a page load another port could trigger, so it is
   accepted but does not renew. Opening the UI, or doing anything in it, still
   does.
-- **A peer that wants a login gives a 502.** When a peer is another llama-swap
-  in form mode and `peers.<id>.apiKey` is missing or wrong, its pages answer
-  with a 502 naming that setting instead of a login page.
+- **A peer that wants a login gives an error, not its login page.** When a
+  peer is another llama-swap in form mode, a missing `peers.<id>.apiKey` makes
+  its pages answer with a 502 naming that setting, and a wrong one with the
+  peer's 401 "invalid API key".
 - **Behind a plain-HTTP reverse proxy, pass the host through.** Those checks
   compare `Origin`/`Referer` with `Host` or `X-Forwarded-Host`. A proxy that
   rewrites `Host` and sets neither (nginx's default) makes login fail with a

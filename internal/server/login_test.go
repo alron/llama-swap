@@ -493,19 +493,25 @@ func TestServer_SessionCookieName(t *testing.T) {
 	if other.validCookie(sessionCookieFor(sa, "key-a", time.Now().Add(time.Hour))) {
 		t.Error("a session from one secret is valid under another")
 	}
+}
 
-	// Instances configured with the same secret and key share a login.
-	shared := newSessionAuth(withSecret(formLoginConfig("key-a"), secretA))
-	if !shared.validCookie(sessionCookieFor(sa, "key-a", time.Now().Add(time.Hour))) {
-		t.Error("instances sharing a secret do not share the login")
-	}
-
-	// Without a configured secret, Servers built by a config reload share the
-	// process secret, so a reload keeps browsers logged in.
+// TestServer_SessionSurvivesConfigReload pins that a config reload, which
+// builds a new Server and so a new sessionAuth, keeps browsers logged in.
+// Without sessionSecret both share the per-process secret; with it, any
+// instance given the same secret and key accepts the session, which is also
+// what keeps logins across restarts and load-balanced processes.
+func TestServer_SessionSurvivesConfigReload(t *testing.T) {
 	before := newSessionAuth(formLoginConfig("key-a"))
 	after := newSessionAuth(formLoginConfig("key-a"))
 	if !after.validCookie(sessionCookieFor(before, "key-a", time.Now().Add(time.Hour))) {
-		t.Error("a session does not survive a config reload")
+		t.Error("without sessionSecret, a session does not survive a config reload")
+	}
+
+	secret := strings.Repeat("s", config.MinSessionSecretLength)
+	issuer := newSessionAuth(withSecret(formLoginConfig("key-a"), secret))
+	shared := newSessionAuth(withSecret(formLoginConfig("key-a"), secret))
+	if !shared.validCookie(sessionCookieFor(issuer, "key-a", time.Now().Add(time.Hour))) {
+		t.Error("instances sharing a sessionSecret do not share the login")
 	}
 }
 
