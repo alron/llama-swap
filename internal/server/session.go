@@ -295,7 +295,10 @@ func isOwnHost(r *http.Request, host string) bool {
 
 // isTopLevelPageLoad reports whether r is the browser loading a page in its
 // own tab. Without Fetch Metadata, over plain HTTP, a page loading in a frame
-// looks the same and is let through too.
+// looks the same and is let through here too. Framing is still refused: the
+// auth middleware sends frame-ancestors 'self' and X-Frame-Options:
+// SAMEORIGIN on every response to a browser, which browsers enforce over
+// plain HTTP as well, so another site's frame never displays the page.
 func isTopLevelPageLoad(r *http.Request) bool {
 	if r.Header.Get("Sec-Fetch-Mode") != "" {
 		return isPageLoad(r) && r.Header.Get("Sec-Fetch-Dest") == "document"

@@ -101,7 +101,10 @@ Things to know:
   affecting API clients. Logging out only clears that browser's cookie.
 - **Each instance has its own login.** Cookies ignore the port, so instances on
   one host see each other's cookies, but each accepts only its own. Instances
-  share a login only when they share both `sessionSecret` and the key.
+  share a login only when they share both `sessionSecret` and the key. Running
+  several llama-swap processes behind one address, such as behind a load
+  balancer? Give them all the same `sessionSecret`, or a browser stays logged
+  in only on the process that issued its cookie.
 - **The session only works from this instance's own pages.** Requests that a
   page on another site or port makes the browser send get a 403, and
   `GET /unload` always needs an API key in a header. Links from elsewhere still

@@ -289,6 +289,8 @@ security:
     #   logs every browser out
     # - set it to keep sessions across restarts; instances with the same
     #   secret and key share a login
+    # - several processes behind one address (a load balancer) need the same
+    #   secret, or a browser is logged in only on the one that issued it
     # - at least 32 characters; changing it logs every browser out
     # - ignored in basic mode
     # sessionSecret: "${env.LLAMA_SWAP_SESSION_SECRET}"

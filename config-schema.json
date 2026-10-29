@@ -999,7 +999,7 @@
                         },
                         "sessionSecret": {
                             "type": "string",
-                            "description": "Secret that signs form login sessions, at least 32 characters. When unset a random secret is generated at startup, so a restart logs every browser out. Set it to keep sessions across restarts, or to share a login between instances that use the same secret and key. Changing it logs every browser out without affecting API clients. Use an env macro to keep it out of the config file. Ignored in basic mode."
+                            "description": "Secret that signs form login sessions, at least 32 characters. When unset a random secret is generated at startup, so a restart logs every browser out. Set it to keep sessions across restarts, or to share a login between instances that use the same secret and key; several processes behind one address, such as a load balancer, need the same one. Changing it logs every browser out without affecting API clients. Use an env macro to keep it out of the config file. Ignored in basic mode."
                         }
                     },
                     "additionalProperties": false
