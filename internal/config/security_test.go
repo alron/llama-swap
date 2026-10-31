@@ -374,3 +374,118 @@ func TestConfig_IsHTTPToken(t *testing.T) {
 		}
 	}
 }
+
+// TestConfig_SecurityAuthDefaults pins that a config without security.auth
+// keeps the Basic challenge llama-swap always sent, and that form mode gets
+// the seven-day session when sessionTTL is left out.
+func TestConfig_SecurityAuthDefaults(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if cfg.Security.Auth.Mode != AuthModeBasic {
+		t.Errorf("mode = %q, want %q", cfg.Security.Auth.Mode, AuthModeBasic)
+	}
+	if cfg.FormLoginEnabled() {
+		t.Error("FormLoginEnabled() = true without security.auth")
+	}
+
+	cfg, err = LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if got := cfg.Security.Auth.EffectiveSessionTTL(); got != DefaultSessionTTL {
+		t.Errorf("sessionTTL = %d, want %d", got, DefaultSessionTTL)
+	}
+	if got := cfg.Security.Auth.SessionMaxLifetime; got == nil || *got != DefaultSessionMaxLifetime {
+		t.Errorf("sessionMaxLifetime = %v, want %d", got, DefaultSessionMaxLifetime)
+	}
+
+	// An explicit 0 means no cap, and must not be replaced by the default.
+	cfg, err = LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 86400\n    sessionMaxLifetime: 0\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if got := cfg.Security.Auth.SessionMaxLifetime; got == nil || *got != 0 {
+		t.Errorf("explicit sessionMaxLifetime 0 loaded as %v, want 0", got)
+	}
+	if !cfg.FormLoginEnabled() {
+		t.Error("FormLoginEnabled() = false with mode form and apiKeys")
+	}
+}
+
+// TestConfig_SecurityAuthRejected covers settings that cannot work: an
+// unknown mode, a negative lifetime, and a login form with no key to log in
+// with.
+func TestConfig_SecurityAuthRejected(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	tests := map[string]struct {
+		yaml string
+		want string
+	}{
+		"unknown mode":                        {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: cookie\n" + models, `"cookie" is not valid`},
+		"negative sessionTTL":                 {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: -1\n" + models, "sessionTTL must be >= 0"},
+		"form without apiKeys":                {"security:\n  auth:\n    mode: form\n" + models, "requires apiKeys"},
+		"negative sessionMaxLifetime":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: -1\n" + models, "sessionMaxLifetime must be >= 0"},
+		"sessionTTL past the ceiling":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 17280001\n    sessionMaxLifetime: 0\n" + models, "sessionTTL must be at most 17280000 (200 days)"},
+		"sessionTTL 0 under the default cap":  {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 0\n" + models, "sessionMaxLifetime (2592000, the default) is shorter than sessionTTL (0, the maximum of 17280000)"},
+		"sessionMaxLifetime past the ceiling": {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionMaxLifetime: 9300000000\n" + models, "sessionMaxLifetime must be at most"},
+		"cap shorter than sessionTTL":         {"apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 7200\n    sessionMaxLifetime: 3600\n" + models, "shorter than sessionTTL"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.yaml))
+			if err == nil {
+				t.Fatal("LoadConfigFromReader accepted the config")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfig_SecurityAuthSessionSecret covers the optional signing secret: a
+// short one would let a leaked cookie be used to test key guesses again, so
+// it is rejected, and a long enough one loads as written.
+func TestConfig_SecurityAuthSessionSecret(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	const prefix = "apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionSecret: "
+
+	_, err := LoadConfigFromReader(strings.NewReader(prefix + "too-short\n" + models))
+	if err == nil || !strings.Contains(err.Error(), "at least 32 characters") {
+		t.Errorf("short secret: err = %v, want it rejected", err)
+	}
+
+	secret := strings.Repeat("s", MinSessionSecretLength)
+	cfg, err := LoadConfigFromReader(strings.NewReader(prefix + secret + "\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if cfg.Security.Auth.SessionSecret != secret {
+		t.Errorf("sessionSecret = %q, want %q", cfg.Security.Auth.SessionSecret, secret)
+	}
+}
+
+// TestConfig_SecurityAuthSessionTTLZeroIsMaximum pins that sessionTTL: 0 is a
+// shortcut for the longest session browsers will reliably keep, while leaving
+// it out still gives the seven-day default.
+func TestConfig_SecurityAuthSessionTTLZeroIsMaximum(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	cfg, err := LoadConfigFromReader(strings.NewReader("apiKeys: [k1]\nsecurity:\n  auth:\n    mode: form\n    sessionTTL: 0\n    sessionMaxLifetime: 0\n" + models))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	if got := cfg.Security.Auth.EffectiveSessionTTL(); got != MaxSessionTTL {
+		t.Errorf("sessionTTL 0 applies as %d, want %d", got, MaxSessionTTL)
+	}
+	if got := cfg.Security.Auth.SessionTTL; got == nil || *got != 0 {
+		t.Errorf("sessionTTL loaded as %v, want the 0 kept as written", got)
+	}
+	if MaxSessionTTL >= 400*24*60*60 {
+		t.Errorf("MaxSessionTTL = %d is not inside the 400 days browsers keep a cookie", MaxSessionTTL)
+	}
+}

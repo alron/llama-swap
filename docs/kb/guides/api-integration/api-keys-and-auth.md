@@ -1,10 +1,10 @@
 ---
 title: API keys, access control, and keeping secrets out of your config
-summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets.
+summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets; security.auth.mode form gives browsers a login page.
 category: guides
-tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control]
-config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env]
-updated: 2026-08-25
+tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control, login, password-manager, session, cookie]
+config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, security.auth.mode, security.auth.sessionTTL, security.auth.sessionMaxLifetime, security.auth.sessionSecret]
+updated: 2026-10-27
 ---
 
 # API keys and keeping secrets out of your config
@@ -45,6 +45,98 @@ front of llama-swap when you need those controls.
 **`apiKeys` is not a substitute for a firewall.** llama-swap starts processes
 on your machine. Do not expose it to the internet on the strength of a bearer
 token alone.
+
+## Logging in from a browser
+
+By default a browser without a key gets a Basic auth challenge and shows its
+native login dialog; the key goes in the password field. Password managers
+often fail to fill that dialog. Form mode replaces it with a login page:
+
+```yaml
+apiKeys:
+  - "${env.LLAMA_SWAP_KEY}"
+security:
+  auth:
+    mode: form                 # default: basic
+    sessionTTL: 604800         # idle timeout, default 7 days; 0 = 200 days
+    sessionMaxLifetime: 2592000 # cap from login, default 30 days; 0 = no cap
+```
+
+Opening the UI now redirects to `/ui/login`. Enter one of the `apiKeys` as the
+API key. A successful login sets a session cookie, and the sidebar gets a
+logout button.
+
+API clients are unaffected: `Authorization: Bearer`, `x-api-key` and Basic auth
+keep working, and a request without a key still gets the Basic challenge.
+Browsers never see the Basic dialog in form mode, not even from an upstream or
+peer, and Basic credentials a browser sends are ignored. Otherwise a browser
+that cached them, say from before you switched to form mode, would stay logged
+in after logging out.
+
+A request counts as a browser's when it carries `Sec-Fetch-*`, `Origin` or
+`Referer` headers or a session cookie, or asks for HTML. A script that sends
+Basic auth along with such headers is treated as a browser too; give it
+`Authorization: Bearer` instead.
+
+Things to know:
+
+- **Form mode requires `apiKeys`.** Without a key the config fails to load.
+- **The login page is not rate limited.** Neither is the API, which accepts the
+  same keys, so a guessable key is exposed either way. Use a long random key.
+- **A session lasts while it is used.** Loading a page, or doing something such
+  as sending a chat, unloading a model or switching profiles, renews it for a
+  full `sessionTTL`. So `sessionTTL` is how long a browser stays logged in after
+  it was last used. Renewal stops at `sessionMaxLifetime` after login (`0`
+  removes the cap). `sessionTTL` is at most 200 days, since browsers keep a
+  cookie at most 400, and `0` means that maximum: `sessionTTL: 0` with
+  `sessionMaxLifetime: 0` keeps a browser logged in indefinitely as long as it
+  is used at least every 200 days. Background requests do not count: a tab left
+  open on a page that polls, such as llama-server's own UI under `/upstream/`,
+  still logs out. Neither does only reading pages without reloading. A proxied
+  UI that writes on its own, say by POSTing on a timer, does count. When a
+  session ends, any request still running is cut off and the UI returns to the
+  login page.
+- **A restart logs browsers out; a config reload does not.** Sessions are
+  signed with a secret generated at startup. Set `sessionSecret` (32+
+  characters, ideally `${env.*}`) to keep them across restarts. Changing it, or
+  removing the key a browser logged in with, logs that browser out without
+  affecting API clients. Logging out only clears that browser's cookie.
+- **Each instance has its own login.** Cookies ignore the port, so instances on
+  one host see each other's cookies, but each accepts only its own. Instances
+  share a login only when they share both `sessionSecret` and the key. Running
+  several llama-swap processes behind one address, such as behind a load
+  balancer? Give them all the same `sessionSecret`, or a browser stays logged
+  in only on the process that issued its cookie.
+- **The session only works from this instance's own pages.** Requests that a
+  page on another site or port makes the browser send get a 403, and
+  `GET /unload` always needs an API key in a header. Links from elsewhere still
+  open the UI, and a link to `/upstream/<model>/` still loads that model. Over
+  plain HTTP, a GET that asks for HTML looks like a page load, so a page on
+  another port of the same host can also send one, for example to load a
+  model. It cannot read the response or keep the session alive.
+- **Over plain HTTP, typing the address does not renew a session.** Browsers
+  send their `Sec-Fetch-*` headers only over HTTPS and to localhost. Without
+  them llama-swap checks `Origin` and `Referer` instead, and a typed address or
+  a reload looks the same as a page load another port could trigger, so it is
+  accepted but does not renew. Opening the UI, or doing anything in it, still
+  does.
+- **A peer that wants a login gives an error, not its login page.** When a
+  peer is another llama-swap in form mode, a missing `peers.<id>.apiKey` makes
+  its pages answer with a 502 naming that setting, and a wrong one with the
+  peer's 401 "invalid API key".
+- **Behind a plain-HTTP reverse proxy, pass the host through.** Those checks
+  compare `Origin`/`Referer` with `Host` or `X-Forwarded-Host`. A proxy that
+  rewrites `Host` and sets neither (nginx's default) makes login fail with a
+  403; with nginx, add `proxy_set_header Host $http_host;`.
+- **The login does not stick over plain HTTP if the proxy says HTTPS.** The
+  cookie is marked `Secure` when llama-swap serves TLS itself or a proxy sends
+  `X-Forwarded-Proto: https`, and browsers then refuse to send it over plain
+  HTTP.
+- **No other site can frame llama-swap in form mode.** Its pages, `/upstream/`
+  ones included, send `frame-ancestors 'self'` and
+  `X-Frame-Options: SAMEORIGIN`, replacing an upstream's own
+  `X-Frame-Options`. So a dashboard cannot embed the UI or a model's page; open
+  it in a tab instead.
 
 ## Keep the keys out of the file
 

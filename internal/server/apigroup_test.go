@@ -624,7 +624,7 @@ func TestServer_APIEvents_InitialPayload(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `"type":"pauseChanged"`, `X-Trace-ID`, `\"helpagent\":{\"disable\":true}`} {
+	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `"type":"pauseChanged"`, `X-Trace-ID`, `\"helpagent\":{\"disable\":true}`, `\"auth\":{\"formLogin\":false}`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("initial SSE payload missing %s; body=%q", want, body)
 		}

@@ -500,6 +500,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		// ReverseProxy adds rather than replaces them, so both llama-swap's
 		// and the upstream's would be sent. Keep only ours; see issue #85.
 		swaputil.StripUpstreamCORSHeaders(resp.Header)
+		swaputil.FilterFormLoginResponse(resp)
 
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			resp.Header.Set("X-Accel-Buffering", "no")

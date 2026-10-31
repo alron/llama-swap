@@ -148,6 +148,10 @@ export interface UIConfig {
   helpagent?: {
     disable: boolean;
   };
+  /** formLogin is set by security.auth.mode: form and shows the logout button. */
+  auth?: {
+    formLogin: boolean;
+  };
 }
 
 export interface NetIOStat {

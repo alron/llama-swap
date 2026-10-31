@@ -1,13 +1,14 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { FerrisWheel, Boxes, Activity, Cat, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings, CircleQuestionMark } from "@lucide/svelte";
+  import { FerrisWheel, Boxes, Activity, Cat, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings, CircleQuestionMark, LogOut } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity, docsAgentStreaming } from "../stores/playgroundActivity";
-  import { performanceEnabled, models, tailcatStatus, helpAgentEnabled } from "../stores/api";
+  import { performanceEnabled, models, tailcatStatus, helpAgentEnabled, formLoginEnabled } from "../stores/api";
+  import { logout } from "../lib/session";
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
@@ -270,6 +271,12 @@
         {/if}
         <span class="sr-only">Toggle theme</span>
       </Button>
+      {#if $formLoginEnabled}
+        <Button variant="ghost" size="icon" onclick={logout} title="Log out">
+          <LogOut />
+          <span class="sr-only">Log out</span>
+        </Button>
+      {/if}
     </div>
   </Sidebar.Footer>
   <Sidebar.Rail />

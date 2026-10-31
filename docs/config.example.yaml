@@ -253,6 +253,48 @@ security:
     # - optional, default: 86400
     maxAge: 86400
 
+  # auth: how a browser is asked for one of the apiKeys
+  # - API clients sending the key as Bearer, x-api-key or Basic auth work the
+  #   same in either mode
+  auth:
+    # mode: basic or form
+    # - optional, default: basic
+    # - basic: the browser shows its native login dialog
+    # - form: the browser is sent to a login page at /ui/login, which password
+    #   managers fill reliably; the password is one of the apiKeys. Browsers
+    #   never get the Basic dialog, and Basic credentials they send are ignored.
+    #   Other sites cannot frame llama-swap's pages in this mode
+    # - form requires apiKeys
+    mode: basic
+
+    # sessionTTL: seconds a form login lasts without being used
+    # - optional, default: 604800 (7 days)
+    # - at most 17280000 (200 days); 0 means that maximum
+    # - loading a page or doing something (a chat, unloading a model) renews
+    #   the session for a full sessionTTL; background requests such as
+    #   polling do not, so an idle open tab still logs out
+    # - ignored in basic mode
+    sessionTTL: 604800
+
+    # sessionMaxLifetime: longest one login can be kept alive by renewal,
+    #   counted from logging in
+    # - optional, default: 2592000 (30 days)
+    # - 0 means no cap; otherwise it must be at least sessionTTL
+    # - at most 315360000 (10 years)
+    # - ignored in basic mode
+    sessionMaxLifetime: 2592000
+
+    # sessionSecret: signs form login sessions
+    # - optional, default: a random secret generated at startup, so a restart
+    #   logs every browser out
+    # - set it to keep sessions across restarts; instances with the same
+    #   secret and key share a login
+    # - several processes behind one address (a load balancer) need the same
+    #   secret, or a browser is logged in only on the one that issued it
+    # - at least 32 characters; changing it logs every browser out
+    # - ignored in basic mode
+    # sessionSecret: "${env.LLAMA_SWAP_SESSION_SECRET}"
+
 # tailcat: configure models exposed over Tailcat virtual TCP port 80
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID

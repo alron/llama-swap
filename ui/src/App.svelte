@@ -26,29 +26,41 @@
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
   import { sidebarOpen, sidebarWidth } from "./stores/sidebar";
+  import { checkSession } from "./lib/session";
 
   // svelte-spa-router's types predate Svelte 5 (loadingComponent wants the
   // old class-component ComponentType); the cast is safe since Router.svelte
   // just instantiates whatever component object it's given.
   const RouteLoading = RouteLoadingImpl as unknown as ComponentType<SvelteComponent>;
 
+  // A route's chunk is fetched on first visit. When that fails because the
+  // form login session ended, go to the login page rather than leave the
+  // loading placeholder spinning.
+  function lazy<T>(load: () => Promise<T>): () => Promise<T> {
+    return () =>
+      load().catch((err) => {
+        void checkSession();
+        throw err;
+      });
+  }
+
   // Routes are lazy-loaded so their (and their dependencies') code isn't part
   // of the initial bundle; each becomes its own chunk fetched on first visit.
   // loadingComponent covers the (usually brief) fetch with a themed
   // placeholder instead of a blank/white flash.
   const routes = {
-    "/": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
+    "/": wrap({ asyncComponent: lazy(() => import("./routes/Activity.svelte")), loadingComponent: RouteLoading }),
     "/playground": AlwaysMountedStub,
     "/help": AlwaysMountedStub,
-    "/models": wrap({ asyncComponent: () => import("./routes/ModelsDash.svelte"), loadingComponent: RouteLoading }),
-    "/models/:id": wrap({ asyncComponent: () => import("./routes/ModelDetail.svelte"), loadingComponent: RouteLoading }),
-    "/logs": wrap({ asyncComponent: () => import("./routes/LogViewer.svelte"), loadingComponent: RouteLoading }),
-    "/activity": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
-    "/settings": wrap({ asyncComponent: () => import("./routes/Settings.svelte"), loadingComponent: RouteLoading }),
-    "/performance": wrap({ asyncComponent: () => import("./routes/Performance.svelte"), loadingComponent: RouteLoading }),
-    "/hardware": wrap({ asyncComponent: () => import("./routes/Hardware.svelte"), loadingComponent: RouteLoading }),
-    "/tailcat": wrap({ asyncComponent: () => import("./routes/Tailcat.svelte"), loadingComponent: RouteLoading }),
-    "*": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
+    "/models": wrap({ asyncComponent: lazy(() => import("./routes/ModelsDash.svelte")), loadingComponent: RouteLoading }),
+    "/models/:id": wrap({ asyncComponent: lazy(() => import("./routes/ModelDetail.svelte")), loadingComponent: RouteLoading }),
+    "/logs": wrap({ asyncComponent: lazy(() => import("./routes/LogViewer.svelte")), loadingComponent: RouteLoading }),
+    "/activity": wrap({ asyncComponent: lazy(() => import("./routes/Activity.svelte")), loadingComponent: RouteLoading }),
+    "/settings": wrap({ asyncComponent: lazy(() => import("./routes/Settings.svelte")), loadingComponent: RouteLoading }),
+    "/performance": wrap({ asyncComponent: lazy(() => import("./routes/Performance.svelte")), loadingComponent: RouteLoading }),
+    "/hardware": wrap({ asyncComponent: lazy(() => import("./routes/Hardware.svelte")), loadingComponent: RouteLoading }),
+    "/tailcat": wrap({ asyncComponent: lazy(() => import("./routes/Tailcat.svelte")), loadingComponent: RouteLoading }),
+    "*": wrap({ asyncComponent: lazy(() => import("./routes/Activity.svelte")), loadingComponent: RouteLoading }),
   };
 
   const routeTitles: Record<string, string> = {

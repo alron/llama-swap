@@ -35,9 +35,139 @@ func DefaultCORSAllowedHeaders() []string {
 	return []string{"Content-Type", "Authorization", "Accept", "X-Requested-With"}
 }
 
+// Values for security.auth.mode.
+const (
+	// AuthModeBasic answers a browser missing an API key with a Basic auth
+	// challenge, which makes it show its native login dialog.
+	AuthModeBasic = "basic"
+	// AuthModeForm sends a browser missing an API key to a login page that
+	// exchanges the key for a session cookie. Browsers never see a Basic
+	// challenge in this mode, and Basic credentials they send are ignored.
+	AuthModeForm = "form"
+)
+
+// DefaultSessionTTL is the security.auth.sessionTTL used when it is not set:
+// seven days, in seconds.
+const DefaultSessionTTL = 7 * 24 * 60 * 60
+
+// DefaultSessionMaxLifetime is the security.auth.sessionMaxLifetime used when
+// it is not set: thirty days, in seconds.
+const DefaultSessionMaxLifetime = 30 * 24 * 60 * 60
+
 // SecurityConfig groups settings that control who may talk to llama-swap.
 type SecurityConfig struct {
 	CORS CORSConfig `yaml:"cors"`
+	Auth AuthConfig `yaml:"auth"`
+}
+
+// AuthConfig controls how a browser is asked for one of the apiKeys. API
+// clients are unaffected by the choice: a key sent as Bearer, x-api-key or
+// Basic auth works in either mode. Only browsers change, and in form mode they
+// log in through the form rather than with Basic auth.
+type AuthConfig struct {
+	// Mode is AuthModeBasic (the default) or AuthModeForm. Form mode requires
+	// apiKeys, since there is otherwise nothing to log in with.
+	Mode string `yaml:"mode"`
+
+	// SessionTTL is how long in seconds a form login lasts without being
+	// used. Using it renews the session, up to SessionMaxLifetime. Not set
+	// means DefaultSessionTTL and 0 means MaxSessionTTL, so it is a pointer
+	// to tell the two apart; read it with EffectiveSessionTTL. Ignored in
+	// basic mode.
+	SessionTTL *int `yaml:"sessionTTL"`
+
+	// SessionMaxLifetime caps in seconds how long one login can be kept alive
+	// by renewal, counted from when the browser logged in. 0 means no cap.
+	// It is a pointer so an absent key (nil, DefaultSessionMaxLifetime) and
+	// an explicit 0 can be told apart. Ignored in basic mode.
+	SessionMaxLifetime *int `yaml:"sessionMaxLifetime"`
+
+	// SessionSecret signs form login sessions. Empty means a random secret
+	// generated when llama-swap starts, so a restart logs every browser out.
+	// Setting it keeps sessions across restarts, and instances that share it
+	// and a key share a login. Changing it logs every browser out without
+	// touching the apiKeys API clients use. Ignored in basic mode.
+	SessionSecret string `yaml:"sessionSecret"`
+}
+
+// MaxSessionTTL is the longest security.auth.sessionTTL, and what 0 means:
+// 200 days, in seconds. Browsers keep a cookie at most 400 days, so a longer
+// sessionTTL would not be honored as written, and after 200 days without
+// opening the UI, logging in again is reasonable.
+const MaxSessionTTL = 200 * 24 * 60 * 60
+
+// MaxSessionMaxLifetime bounds security.auth.sessionMaxLifetime. Ten years is
+// far beyond any useful session and far below the roughly 292 years at which
+// it would overflow time.Duration. Renewals carry a session past the
+// browser's 400-day cookie limit, so this one is not tied to it.
+const MaxSessionMaxLifetime = 10 * 365 * 24 * 60 * 60
+
+// EffectiveSessionTTL returns sessionTTL in seconds as it applies:
+// DefaultSessionTTL when not set, and MaxSessionTTL for 0.
+func (c AuthConfig) EffectiveSessionTTL() int {
+	switch {
+	case c.SessionTTL == nil:
+		return DefaultSessionTTL
+	case *c.SessionTTL == 0:
+		return MaxSessionTTL
+	default:
+		return *c.SessionTTL
+	}
+}
+
+// MinSessionSecretLength is the shortest security.auth.sessionSecret accepted.
+// The secret is all that stops a leaked session cookie from being used to
+// test API key guesses offline, so it must not be guessable itself.
+const MinSessionSecretLength = 32
+
+// Validate reports an unknown mode, a negative or inconsistent session
+// lifetime, or a short session secret. An unset sessionMaxLifetime is checked
+// as its default, so the loader fills that in afterwards.
+func (c AuthConfig) Validate() error {
+	switch c.Mode {
+	case AuthModeBasic, AuthModeForm:
+	default:
+		return fmt.Errorf("mode: %q is not valid, use %q or %q", c.Mode, AuthModeBasic, AuthModeForm)
+	}
+	if ttl := c.SessionTTL; ttl != nil {
+		if *ttl < 0 {
+			return fmt.Errorf("sessionTTL must be >= 0")
+		}
+		if *ttl > MaxSessionTTL {
+			return fmt.Errorf("sessionTTL must be at most %d (200 days); 0 means that maximum", MaxSessionTTL)
+		}
+	}
+
+	maxLifetime, maxText := DefaultSessionMaxLifetime, fmt.Sprintf("%d, the default", DefaultSessionMaxLifetime)
+	if c.SessionMaxLifetime != nil {
+		maxLifetime, maxText = *c.SessionMaxLifetime, fmt.Sprint(*c.SessionMaxLifetime)
+	}
+	if maxLifetime < 0 {
+		return fmt.Errorf("sessionMaxLifetime must be >= 0")
+	}
+	if maxLifetime > MaxSessionMaxLifetime {
+		return fmt.Errorf("sessionMaxLifetime must be at most %d (10 years); use 0 for no cap", MaxSessionMaxLifetime)
+	}
+	// A cap below the session length would silently shorten every login,
+	// which is more likely a mistake than the intent.
+	if ttl := c.EffectiveSessionTTL(); maxLifetime > 0 && maxLifetime < ttl {
+		ttlText := fmt.Sprint(ttl)
+		if c.SessionTTL != nil && *c.SessionTTL == 0 {
+			ttlText = fmt.Sprintf("0, the maximum of %d", ttl)
+		}
+		return fmt.Errorf("sessionMaxLifetime (%s) is shorter than sessionTTL (%s); raise sessionMaxLifetime, or set it to 0 for no cap", maxText, ttlText)
+	}
+	if c.SessionSecret != "" && len(c.SessionSecret) < MinSessionSecretLength {
+		return fmt.Errorf("sessionSecret must be at least %d characters; generate one with: head -c 32 /dev/urandom | base64", MinSessionSecretLength)
+	}
+	return nil
+}
+
+// FormLoginEnabled reports whether browsers log in through the login form.
+// The loader already rejects form mode without apiKeys; checking the keys here
+// too keeps a Config built directly in Go from serving a login nothing passes.
+func (c Config) FormLoginEnabled() bool {
+	return c.Security.Auth.Mode == AuthModeForm && len(c.RequiredAPIKeys) > 0
 }
 
 // CORSConfig controls the Access-Control-* headers llama-swap sends.

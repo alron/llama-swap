@@ -116,6 +116,21 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("security.cors: %w", err)
 	}
 
+	if config.Security.Auth.Mode == "" {
+		config.Security.Auth.Mode = AuthModeBasic
+	}
+	if config.Security.Auth.SessionTTL == nil {
+		ttl := DefaultSessionTTL
+		config.Security.Auth.SessionTTL = &ttl
+	}
+	if err := config.Security.Auth.Validate(); err != nil {
+		return Config{}, fmt.Errorf("security.auth: %w", err)
+	}
+	if config.Security.Auth.SessionMaxLifetime == nil {
+		maxLifetime := DefaultSessionMaxLifetime
+		config.Security.Auth.SessionMaxLifetime = &maxLifetime
+	}
+
 	if _, _, _, err := ParseLogToStdout(config.LogToStdout); err != nil {
 		return Config{}, err
 	}
@@ -311,6 +326,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("apiKeys[%d]: api key cannot contain spaces", i)
 		}
 		config.RequiredAPIKeys[i] = apikey
+	}
+	if config.Security.Auth.Mode == AuthModeForm && len(config.RequiredAPIKeys) == 0 {
+		return Config{}, fmt.Errorf("security.auth: mode %q requires apiKeys; without any key there is nothing to log in with", AuthModeForm)
 	}
 
 	if err := ValidatePeerNamespace(config); err != nil {

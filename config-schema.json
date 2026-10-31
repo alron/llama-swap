@@ -969,6 +969,40 @@
                         ]
                     },
                     "additionalProperties": false
+                },
+                "auth": {
+                    "type": "object",
+                    "description": "How a browser is asked for one of the apiKeys. API clients sending the key in a header are unaffected.",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": [
+                                "basic",
+                                "form"
+                            ],
+                            "default": "basic",
+                            "description": "'basic' answers a browser without a key with a Basic auth challenge, so it shows its native login dialog. 'form' sends it to a login page at /ui/login that exchanges the key for a session cookie, which password managers handle better, and never shows a browser the Basic dialog: Basic credentials a browser sends are ignored. A request counts as a browser's when it carries Sec-Fetch-*, Origin or Referer headers or a session cookie, or asks for HTML. Other sites cannot frame llama-swap's pages in this mode. API clients keep Bearer, x-api-key and Basic auth in both modes. 'form' requires apiKeys."
+                        },
+                        "sessionTTL": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 17280000,
+                            "default": 604800,
+                            "description": "How long in seconds a form login lasts without being used. Loading a page or a request that changes something (POST, PUT, PATCH, DELETE) renews the session for a full sessionTTL, up to sessionMaxLifetime; background GETs such as polling do not. At most 17280000 (200 days), since browsers keep a cookie at most 400 days; 0 means that maximum. Default 604800 (7 days) when not set. Ignored in basic mode."
+                        },
+                        "sessionMaxLifetime": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 315360000,
+                            "default": 2592000,
+                            "description": "Longest in seconds one form login can be kept alive by renewal, counted from logging in. 0 means no cap. When set it must be at least sessionTTL and at most 315360000 (10 years). Lowering it ends existing sessions it no longer allows. Default 2592000 (30 days). Ignored in basic mode."
+                        },
+                        "sessionSecret": {
+                            "type": "string",
+                            "description": "Secret that signs form login sessions, at least 32 characters. When unset a random secret is generated at startup, so a restart logs every browser out. Set it to keep sessions across restarts, or to share a login between instances that use the same secret and key; several processes behind one address, such as a load balancer, need the same one. Changing it logs every browser out without affecting API clients. Use an env macro to keep it out of the config file. Ignored in basic mode."
+                        }
+                    },
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false,

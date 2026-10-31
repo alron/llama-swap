@@ -396,7 +396,8 @@ func stripAudioAPIPrefix(r *http.Request) {
 // global CORS middleware.
 func (s *Server) routes() {
 
-	authMW := CreateAuthMiddleware(s.cfg)
+	sessions := newSessionAuth(s.cfg)
+	authMW := createAuthMiddleware(s.cfg.RequiredAPIKeys, sessions, sessionAccepted)
 	modelMWs := []chain.Middleware{authMW, createContentTypeMiddleware(s.cfg.MaxRequestBodyBytes())}
 	// globalConcurrencyLimit guards the top of the inference chain; a limit of
 	// 0 (the default) means no limit, so the handler is left out of the chain
@@ -449,6 +450,14 @@ func (s *Server) routes() {
 		redirectRelative(w, "ui/", http.StatusPermanentRedirect)
 	})
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
+	// Form login lives under /ui/ so its relative redirects survive a
+	// prefix-stripping reverse proxy. It is only registered in form mode;
+	// basic mode serves exactly what it did before the setting existed.
+	if sessions != nil {
+		mux.HandleFunc("GET /ui/login", sessions.handleLoginPage)
+		mux.HandleFunc("POST /ui/login", sessions.handleLogin)
+		mux.HandleFunc("POST /ui/logout", sessions.handleLogout)
+	}
 	// The browser fetches the web app manifest - and the icons it references -
 	// itself while deciding whether to offer installing the PWA, and it has no
 	// way to attach an API key to those requests. Serve them without auth so
@@ -466,8 +475,10 @@ func (s *Server) routes() {
 	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
 	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
 
-	// Operations endpoints.
-	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
+	// Operations endpoints. GET /unload acts on a plain GET, which a page on
+	// another site or port can make a browser send, so it takes API keys only
+	// and never the form login cookie. The UI unloads via POST /api/... .
+	mux.Handle("GET /unload", chain.New(createAuthMiddleware(s.cfg.RequiredAPIKeys, sessions, sessionIgnored)).ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can

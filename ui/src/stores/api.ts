@@ -18,6 +18,7 @@ import type {
 } from "../lib/types";
 import { appendActivityFilters, type ActivityFilters } from "../lib/activityFilters";
 import { apiUrl } from "../lib/apiPath";
+import { checkSession } from "../lib/session";
 import { connectionState } from "./theme";
 
 // Stores
@@ -45,10 +46,13 @@ export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
 const defaultUIConfig = (): UIConfig => ({
   activity: { session_id: ["X-Session-ID", "X-Litellm-Session-Id"] },
   helpagent: { disable: false },
+  auth: { formLogin: false },
 });
 export const uiConfig = writable<UIConfig>(defaultUIConfig());
 /** False when the config sets helpagent.disable, which hides the Help page. */
 export const helpAgentEnabled = derived(uiConfig, ($uiConfig) => !$uiConfig.helpagent?.disable);
+/** True when security.auth.mode is form, which gives the UI a logout button. */
+export const formLoginEnabled = derived(uiConfig, ($uiConfig) => !!$uiConfig.auth?.formLogin);
 export const performanceEnabled = writable<boolean>(false);
 export const tailcatStatus = writable<TailcatStatus>({ enabled: false, address: "", models: [] });
 export const versionInfo = writable<VersionInfo>({
@@ -128,6 +132,7 @@ export function enableAPIEvents(enabled: boolean): void {
       retryCount++;
       const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
       connectionState.set("disconnected");
+      void checkSession();
       setTimeout(connect, delay);
     };
   };

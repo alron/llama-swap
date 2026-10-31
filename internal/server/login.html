@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Log in · llama-swap</title>
+<link rel="icon" href="../favicon.ico">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1d2330;
+    --border: #d5d9e0;
+    --accent: #2f6fde;
+    --error-bg: #fdecec;
+    --error-text: #a12121;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b;
+      --card: #1b1f27;
+      --text: #e6e9ef;
+      --border: #333a46;
+      --accent: #5b8ff0;
+      --error-bg: #3a1c1f;
+      --error-text: #f4a7a7;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    width: 100%;
+    max-width: 360px;
+    padding: 28px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  h1 { margin: 0 0 20px; font-size: 1.25rem; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; }
+  .field { margin-bottom: 16px; }
+  input[type=text], input[type=password] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    width: 100%;
+    padding: 9px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .error {
+    margin: 0 0 16px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>llama-swap</h1>
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="login">
+    <input type="hidden" id="next" name="next" value="{{.Next}}">
+    <div class="field">
+      <label for="password">API key</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+    </div>
+    <button type="submit">Log in</button>
+  </form>
+</main>
+<script>
+  // The UI routes with the URL fragment, which never reaches the server, so
+  // carry it through the login to land on the page that was asked for.
+  (function () {
+    var next = document.getElementById("next");
+    if (location.hash && next.value.indexOf("#") < 0) {
+      next.value = (next.value || "/ui/") + location.hash;
+    }
+  })();
+</script>
+</body>
+</html>
