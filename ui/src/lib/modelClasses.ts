@@ -5,9 +5,9 @@ import type { Model } from "./types";
  * capability flags and modality lists - never from the model ID, so IDs stay
  * free of grouping prefixes.
  */
-export type ModelClass = "chat" | "image" | "video" | "audio" | "embed" | "rerank";
+export type ModelClass = "chat" | "image" | "video" | "audio" | "embed" | "rerank" | "decision";
 
-/** Section order for the Models list: chat first as the most-used class, then the generation modalities, then the retrieval helpers. */
+/** Section order for the Models list: chat first as the most-used class, then the generation modalities, then the retrieval and decision helpers. */
 export const MODEL_CLASS_ORDER: readonly ModelClass[] = [
   "chat",
   "image",
@@ -15,6 +15,7 @@ export const MODEL_CLASS_ORDER: readonly ModelClass[] = [
   "audio",
   "embed",
   "rerank",
+  "decision",
 ];
 
 export const modelClassLabels: Record<ModelClass, string> = {
@@ -24,6 +25,7 @@ export const modelClassLabels: Record<ModelClass, string> = {
   audio: "Audio",
   embed: "Embeddings",
   rerank: "Rerank",
+  decision: "Decisions",
 };
 
 type Classifiable = Pick<Model, "capabilities" | "modalities">;
@@ -36,7 +38,9 @@ type Classifiable = Pick<Model, "capabilities" | "modalities">;
  *   producing audio - only audio OUTPUT makes a model Audio, so LFM3-Omni-style
  *   omni chat models stay in Chat;
  * - an embedding model can surface as text->text from capability discovery, so
- *   the explicit embeddings flag must win when set.
+ *   the explicit embeddings flag must win when set;
+ * - a decision model (out: [decisions]) generates no text, so it is no chat
+ *   model even though it has no capability flags.
  */
 export function classifyModel(model: Classifiable): ModelClass {
   // Record cast, matching matchesCapabilities: the embeddings key arrives
@@ -50,6 +54,7 @@ export function classifyModel(model: Classifiable): ModelClass {
   if (model.modalities?.out?.includes("video")) return "video";
   if (caps.audio_speech || model.modalities?.out?.includes("audio")) return "audio";
   if (caps.embeddings) return "embed";
+  if (model.modalities?.out?.includes("decisions")) return "decision";
   return "chat";
 }
 

@@ -104,6 +104,15 @@ describe("classifyModel", () => {
     expect(classifyModel(fixture({ reranker: true }))).toBe("rerank");
   });
 
+  it("classifies a decision model by its output modality, not as chat", () => {
+    // llama-server lists a decision model with output_modalities ["decisions"];
+    // it answers /v1/systemone and has no capability flags.
+    expect(classifyModel(fixture(undefined, ["decisions"], ["text"]))).toBe("decision");
+    expect(
+      classifyModel(fixture({ vision: true }, ["decisions"], ["text", "image"])),
+    ).toBe("decision");
+  });
+
   it("falls back to chat for a model with no signals at all", () => {
     // live pre-flag: embed-embeddinggemma-2 (context only, nothing advertised)
     expect(classifyModel(fixture())).toBe("chat");
