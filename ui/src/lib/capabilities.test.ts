@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { formatContextLength, listCapabilityBadges, capabilityLabels, capabilityBadgeClass } from "./capabilities";
+import {
+  formatContextLength,
+  listCapabilityBadges,
+  reportedCapabilities,
+  capabilityLabels,
+  capabilityBadgeClass,
+} from "./capabilities";
 import type { Model } from "./types";
 
 describe("formatContextLength", () => {
@@ -131,5 +137,44 @@ describe("listCapabilityBadges", () => {
     for (const badge of badges) {
       expect(capabilityBadgeClass[badge.key], `missing color for ${badge.key}`).toBeTruthy();
     }
+  });
+
+  it("gives every labelled capability a color class", () => {
+    for (const key of Object.keys(capabilityLabels)) {
+      expect(capabilityBadgeClass[key], `missing color for ${key}`).toBeTruthy();
+    }
+  });
+
+  it("badges a decision model from its output modality", () => {
+    // /v1/models reports a decision model as out: [decisions] with no flag.
+    const badges = listCapabilityBadges({
+      modalities: { in: ["text"], out: ["decisions"] },
+      context_length: 8192,
+    });
+    expect(badges).toEqual([
+      { key: "decisions", label: "Decisions" },
+      { key: "context", label: "8K" },
+    ]);
+  });
+});
+
+describe("reportedCapabilities", () => {
+  it("adds decisions for a decision model", () => {
+    expect(
+      reportedCapabilities({
+        capabilities: { vision: true },
+        modalities: { in: ["text", "image"], out: ["decisions"] },
+      }),
+    ).toEqual({ vision: true, decisions: true });
+  });
+
+  it("passes other models' flags through unchanged", () => {
+    expect(
+      reportedCapabilities({
+        capabilities: { function_calling: true },
+        modalities: { in: ["text"], out: ["text"] },
+      }),
+    ).toEqual({ function_calling: true });
+    expect(reportedCapabilities({})).toEqual({});
   });
 });

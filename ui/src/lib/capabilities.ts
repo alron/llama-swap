@@ -11,7 +11,20 @@ export const capabilityLabels: Record<string, string> = {
   function_calling: "Function Calling",
   reranker: "Reranker",
   embeddings: "Embeddings",
+  decisions: "Decisions",
 };
+
+// Returns a model's capability flags plus "decisions" for a decision model.
+// /v1/models has no flag for those: llama-swap reports them only through the
+// output modality "decisions", since they answer /v1/systemone and generate
+// no text. Folding it in gives them a label and badge like any capability.
+export function reportedCapabilities(
+  model: Pick<Model, "capabilities" | "modalities">,
+): Record<string, boolean> {
+  const caps: Record<string, boolean> = { ...(model.capabilities ?? {}) };
+  if (model.modalities?.out?.includes("decisions")) caps.decisions = true;
+  return caps;
+}
 
 export interface CapabilityBadge {
   key: string;
@@ -46,6 +59,7 @@ export const capabilityBadgeClass: Record<string, string> = {
   function_calling: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   reranker: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
   embeddings: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  decisions: "bg-lime-500/15 text-lime-700 dark:text-lime-300",
   context: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
 };
 
@@ -53,13 +67,13 @@ export const capabilityBadgeClass: Record<string, string> = {
 // capability in canonical order (mirroring the Details tab tag set), with the
 // context window last so it sits on the right of the group.
 export function listCapabilityBadges(
-  model: Pick<Model, "capabilities" | "context_length">,
+  model: Pick<Model, "capabilities" | "modalities" | "context_length">,
 ): CapabilityBadge[] {
   const badges: CapabilityBadge[] = [];
 
-  const caps = model.capabilities ?? {};
+  const caps = reportedCapabilities(model);
   for (const key of Object.keys(capabilityLabels)) {
-    if (caps[key as keyof Model["capabilities"]]) {
+    if (caps[key]) {
       badges.push({ key, label: capabilityLabels[key] });
     }
   }
