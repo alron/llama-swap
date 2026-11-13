@@ -78,8 +78,9 @@ models:
 
 ## Upstreams that require their own key
 
-When a model's server is started with its own key, such as llama-server's
-`LLAMA_API_KEY`, give llama-swap that key with `proxyApiKey`:
+When a server llama-swap starts for a model requires its own key, such as
+llama-server with `LLAMA_API_KEY` set, give llama-swap the same key with
+`proxyApiKey`:
 
 ```yaml
 apiKeys:
@@ -96,9 +97,13 @@ models:
 llama-swap sends it as `Authorization: Bearer <key>` and `x-api-key: <key>` on
 every request it makes to that upstream: proxied requests, `/upstream/<model>/`
 pages, health checks and capability detection. Any key the client sent is
-replaced, so the upstream's key and `apiKeys` are independent and can be
-rotated separately, and clients never learn the upstream's key. llama-server's
-own web UI under `/upstream/<model>/` works without entering a key.
+replaced, so clients never learn the upstream's key. llama-server's own web UI
+under `/upstream/<model>/` works without entering a key.
+
+`proxyApiKey` must equal the key the upstream was started with. It is unrelated
+to `apiKeys`, which clients present *to* llama-swap, so the two can be rotated
+separately. It is for models llama-swap runs; a remote API such as OpenRouter is
+a peer, and takes `peers.<id>.apiKey` instead (below).
 
 Without `proxyApiKey`, the client's credentials are passed through unchanged.
 That works only when the client sends the upstream's key as a Bearer token.
