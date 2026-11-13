@@ -548,7 +548,7 @@
                         "type": "string",
                         "default": "",
                         "pattern": "^\\S*$",
-                        "description": "API key llama-swap presents to this model's upstream, for one started with its own key (e.g. llama-server --api-key). Sent as Authorization: Bearer and x-api-key on every request llama-swap makes to the upstream, replacing any key the client sent. Independent of apiKeys. Use ${env.VAR} to avoid storing it in the config."
+                        "description": "API key llama-swap presents to this model's upstream, for one started with its own key (e.g. llama-server with LLAMA_API_KEY in env). Sent as Authorization: Bearer and x-api-key on every request llama-swap makes to the upstream, replacing any key the client sent. Independent of apiKeys. Use ${env.VAR} to avoid storing it in the config."
                     },
                     "filters": {
                         "type": "object",

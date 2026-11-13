@@ -464,7 +464,9 @@ models:
 
     # proxyApiKey: the key llama-swap presents to this model's upstream
     # - optional, default: ""
-    # - for an upstream started with its own key, e.g. llama-server --api-key
+    # - for an upstream started with its own key, e.g. llama-server reading
+    #   LLAMA_API_KEY; set that in env rather than --api-key in cmd, since a
+    #   command line is visible to every user on the machine
     # - sent as Authorization: Bearer and x-api-key on every request llama-swap
     #   makes to the upstream (health checks included), replacing any key the
     #   client sent, so it is independent of apiKeys

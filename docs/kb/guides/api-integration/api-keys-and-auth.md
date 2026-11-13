@@ -78,8 +78,8 @@ models:
 
 ## Upstreams that require their own key
 
-When a model's server is started with its own key, such as
-`llama-server --api-key`, give llama-swap that key with `proxyApiKey`:
+When a model's server is started with its own key, such as llama-server's
+`LLAMA_API_KEY`, give llama-swap that key with `proxyApiKey`:
 
 ```yaml
 apiKeys:
@@ -87,8 +87,10 @@ apiKeys:
 
 models:
   qwen:
-    cmd: llama-server --port ${PORT} --api-key ${env.LLAMA_SERVER_KEY} ...
-    proxyApiKey: ${env.LLAMA_SERVER_KEY}   # what llama-swap presents upstream
+    cmd: llama-server --port ${PORT} ...
+    env:
+      - "LLAMA_API_KEY=${env.LLAMA_SERVER_KEY}"   # the upstream's own key
+    proxyApiKey: ${env.LLAMA_SERVER_KEY}         # what llama-swap presents upstream
 ```
 
 llama-swap sends it as `Authorization: Bearer <key>` and `x-api-key: <key>` on
@@ -106,6 +108,9 @@ llama-server rejects, so the Playground fails with `401 invalid api key` while
 
 Things to know:
 
+- **Give the upstream its key through `env`, not `cmd`.** A command line,
+  `--api-key` included, is visible to every user on the machine in the process
+  list; a process's environment is visible only to its owner and root.
 - **llama-swap becomes the gate.** Anyone llama-swap lets in can use the
   upstream. Keep the upstream's port off the network (llama-server listens on
   localhost by default).
