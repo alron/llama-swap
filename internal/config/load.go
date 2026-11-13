@@ -194,6 +194,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("model %s: invalid proxy URL: %w", modelId, err)
 		}
 
+		// A key read from an env file often brings a trailing newline, which
+		// would make every request to the upstream fail as an invalid header.
+		if strings.ContainsAny(modelConfig.ProxyApiKey, " \t\r\n") {
+			return Config{}, fmt.Errorf("model %s: proxyApiKey cannot contain whitespace", modelId)
+		}
+
 		if modelConfig.SendLoadingState == nil {
 			v := config.SendLoadingState
 			modelConfig.SendLoadingState = &v

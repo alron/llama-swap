@@ -1731,6 +1731,45 @@ models:
 
 }
 
+func TestConfig_ProxyApiKey(t *testing.T) {
+	t.Run("env and model macros", func(t *testing.T) {
+		t.Setenv("TEST_UPSTREAM_KEY", "upstream-secret")
+
+		content := `
+models:
+  from-env:
+    cmd: llama-server --port ${PORT} --api-key ${env.TEST_UPSTREAM_KEY}
+    proxyApiKey: "${env.TEST_UPSTREAM_KEY}"
+  from-macro:
+    macros:
+      KEY: macro-secret
+    cmd: llama-server --port ${PORT} --api-key ${KEY}
+    proxyApiKey: "${KEY}"
+  unset:
+    cmd: llama-server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "upstream-secret", config.Models["from-env"].ProxyApiKey)
+		assert.Equal(t, "macro-secret", config.Models["from-macro"].ProxyApiKey)
+		assert.Equal(t, "", config.Models["unset"].ProxyApiKey)
+	})
+
+	t.Run("whitespace rejected", func(t *testing.T) {
+		for _, key := range []string{`"abc def"`, `"abc\n"`, `"\tabc"`} {
+			content := `
+models:
+  m:
+    cmd: llama-server --port ${PORT}
+    proxyApiKey: ` + key + "\n"
+			_, err := LoadConfigFromReader(strings.NewReader(content))
+			if assert.Error(t, err, "proxyApiKey %s", key) {
+				assert.Contains(t, err.Error(), "proxyApiKey cannot contain whitespace")
+			}
+		}
+	})
+}
+
 func TestConfig_TimeoutsParsing(t *testing.T) {
 	configYaml := `
 models:

@@ -544,6 +544,12 @@
                         "default": "",
                         "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
                     },
+                    "proxyApiKey": {
+                        "type": "string",
+                        "default": "",
+                        "pattern": "^\\S*$",
+                        "description": "API key llama-swap presents to this model's upstream, for one started with its own key (e.g. llama-server --api-key). Sent as Authorization: Bearer and x-api-key on every request llama-swap makes to the upstream, replacing any key the client sent. Independent of apiKeys. Use ${env.VAR} to avoid storing it in the config."
+                    },
                     "filters": {
                         "type": "object",
                         "properties": {

@@ -462,6 +462,15 @@ models:
     #   is different from the model's ID
     useModelName: "openai/gpt-oss-120B"
 
+    # proxyApiKey: the key llama-swap presents to this model's upstream
+    # - optional, default: ""
+    # - for an upstream started with its own key, e.g. llama-server --api-key
+    # - sent as Authorization: Bearer and x-api-key on every request llama-swap
+    #   makes to the upstream (health checks included), replacing any key the
+    #   client sent, so it is independent of apiKeys
+    # - use an env macro so the key stays out of the config file
+    # proxyApiKey: ${env.LLAMA_SERVER_KEY}
+
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
     # - same capabilities as peer filters (stripParams, setParams)

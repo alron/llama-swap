@@ -148,6 +148,13 @@ type ModelConfig struct {
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
+	// ProxyApiKey is the key llama-swap presents to the upstream, for one
+	// started with its own API key such as llama-server --api-key. It is sent
+	// as Authorization: Bearer and x-api-key on every request llama-swap makes
+	// to the upstream, replacing any key the client sent, so the upstream's
+	// key is independent of apiKeys and of how the client logged in.
+	ProxyApiKey string `yaml:"proxyApiKey"`
+
 	// Capacities declares resource usage for the capacity router. Missing pools
 	// consume zero; higher EvictCost favors keeping this model resident.
 	Capacities map[string]int64 `yaml:"capacities"`

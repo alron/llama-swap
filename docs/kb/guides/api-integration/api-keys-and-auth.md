@@ -1,10 +1,10 @@
 ---
 title: API keys, access control, and keeping secrets out of your config
-summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets.
+summary: apiKeys authentication has no per-key rate limits or user permissions; use env macros for secrets; models.*.proxyApiKey gives an upstream its own key.
 category: guides
-tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control]
-config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env]
-updated: 2026-08-25
+tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control, upstream, llama-server, 401]
+config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env, models.*.proxyApiKey]
+updated: 2026-11-13
 ---
 
 # API keys and keeping secrets out of your config
@@ -76,6 +76,44 @@ models:
     cmd: llama-server --port ${PORT} -hf some/repo
 ```
 
+## Upstreams that require their own key
+
+When a model's server is started with its own key, such as
+`llama-server --api-key`, give llama-swap that key with `proxyApiKey`:
+
+```yaml
+apiKeys:
+  - "${env.LLAMA_SWAP_KEY}"      # what clients present to llama-swap
+
+models:
+  qwen:
+    cmd: llama-server --port ${PORT} --api-key ${env.LLAMA_SERVER_KEY} ...
+    proxyApiKey: ${env.LLAMA_SERVER_KEY}   # what llama-swap presents upstream
+```
+
+llama-swap sends it as `Authorization: Bearer <key>` and `x-api-key: <key>` on
+every request it makes to that upstream: proxied requests, `/upstream/<model>/`
+pages, health checks and capability detection. Any key the client sent is
+replaced, so the upstream's key and `apiKeys` are independent and can be
+rotated separately, and clients never learn the upstream's key. llama-server's
+own web UI under `/upstream/<model>/` works without entering a key.
+
+Without `proxyApiKey`, the client's credentials are passed through unchanged.
+That works only when the client sends the upstream's key as a Bearer token.
+A browser that logged in to the web UI sends it as Basic auth, which
+llama-server rejects, so the Playground fails with `401 invalid api key` while
+`curl` with the same key succeeds.
+
+Things to know:
+
+- **llama-swap becomes the gate.** Anyone llama-swap lets in can use the
+  upstream. Keep the upstream's port off the network (llama-server listens on
+  localhost by default).
+- **The key cannot contain whitespace.** A key read from a file with a trailing
+  newline fails config loading rather than every request.
+- **It is per model.** Models sharing an upstream key each need the line; a
+  macro keeps it in one place.
+
 ## How peer keys are used
 
 `peers.*.apiKey` is injected into outgoing requests to that peer, as **both**
@@ -91,6 +129,7 @@ Worth being aware of, because config files get pasted into issues and chats:
 
 - `apiKeys` — literal keys, unless you used env macros
 - `peers.*.apiKey` — literal peer keys, same
+- `models.*.proxyApiKey` — literal upstream keys, same
 - `models.*.env` — literal `NAME=value` pairs
 - `models.*.cmd` / `cmdStop` — full command lines, which often carry
   `--api-key` flags and absolute paths

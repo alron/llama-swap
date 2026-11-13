@@ -28,6 +28,24 @@ var ErrStartAborted = fmt.Errorf("aborted")
 // shape of a model still booting, so they must not be logged as proxy errors.
 type healthCheckKey struct{}
 
+// upstreamKeyTransport presents an upstream's own API key (proxyApiKey) on
+// every request llama-swap sends it, the health check included, replacing
+// whatever key the client sent llama-swap. It sets the key at the transport,
+// after the reverse proxy has removed hop-by-hop headers, so a client cannot
+// strip it by naming it in a Connection header, and on a copy of the request,
+// which a RoundTripper must not modify.
+type upstreamKeyTransport struct {
+	next http.RoundTripper
+	key  string
+}
+
+func (t upstreamKeyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.key)
+	r.Header.Set("x-api-key", t.key)
+	return t.next.RoundTrip(r)
+}
+
 // newProxyErrorHandler builds the ErrorHandler for a model's reverse proxy.
 //
 // httputil.ReverseProxy's default handler answers every failure with 502, so a
@@ -497,6 +515,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
 		DisableKeepAlives:     p.config.DisableKeepAlives,
 	}
+	if key := p.config.ProxyApiKey; key != "" {
+		reverseProxy.Transport = upstreamKeyTransport{next: reverseProxy.Transport, key: key}
+	}
 	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
 		// Upstreams such as llama-server set their own CORS headers, and
@@ -893,6 +914,10 @@ func (p *ProcessCommand) detectUpstream(ctx context.Context, retry bool) {
 		return
 	}
 	client := capcompat.NewClient(base, p.config.Timeouts, p.proxyLogger)
+	if key := p.config.ProxyApiKey; key != "" {
+		client.SetHeader("Authorization", "Bearer "+key)
+		client.SetHeader("x-api-key", key)
+	}
 	name := capcompat.UpstreamModelName(p.id, p.config)
 
 	var info capcompat.Info

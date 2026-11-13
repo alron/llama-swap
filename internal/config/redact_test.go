@@ -8,7 +8,7 @@ import (
 // redactFixture is a config that exercises every redaction path: a top-level
 // key list, a nested credential key, a secret inside a cmd string, a secret
 // env value next to a harmless one, and a macro whose value is a known token
-// format even though its name is innocent.
+// format even though its name is innocent, and an upstream key.
 const redactFixture = `
 apiKeys:
   - "sk-frontdoorkey1234567890abcd"
@@ -22,6 +22,7 @@ models:
     env:
       - "HF_TOKEN=hf_BBBBBBBBBBBBBBBBBBBBBBBB"
       - "CUDA_VISIBLE_DEVICES=1"
+    proxyApiKey: "upstream-shared-secret"
 peers:
   upstream1:
     proxy: "http://10.0.0.5:8080"
@@ -50,6 +51,7 @@ func TestConfig_RedactedYAML_RemovesEveryCredential(t *testing.T) {
 		"hf_AAAAAAAAAAAAAAAAAAAAAAAA",
 		"hf_BBBBBBBBBBBBBBBBBBBBBBBB",
 		"peer-shared-secret",
+		"upstream-shared-secret",
 	} {
 		if strings.Contains(out, leak) {
 			t.Errorf("redacted config still contains secret %q:\n%s", leak, out)
